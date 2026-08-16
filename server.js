@@ -211,43 +211,82 @@ function getTransporter() {
 }
 
 async function sendOtpEmail(to, otp) {
-  const resendApiKey = process.env.RESEND_API_KEY;
+  const resendApiKey = process.env.RESEND_API_KEY ? process.env.RESEND_API_KEY.trim() : "";
+  const brevoApiKey = process.env.BREVO_API_KEY ? process.env.BREVO_API_KEY.trim() : "";
   const emailUser = normalizeEmail(process.env.EMAIL_USER);
 
-  // 1. HTTP API Delivery via Resend (Bypasses Render cloud SMTP firewall blocks)
+  // 1. Resend HTTP API
   if (resendApiKey) {
-    const fromAddr = process.env.EMAIL_FROM || "Smart Student Portal <onboarding@resend.dev>";
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${resendApiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        from: fromAddr,
-        to: [to],
-        subject: "Smart Student Portal — Password Reset OTP",
-        html: `
-          <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:16px">
-            <h2 style="color:#4f46e5">Smart Student Portal</h2>
-            <p>Use the following OTP to reset your password:</p>
-            <div style="font-size:36px;font-weight:700;letter-spacing:10px;padding:18px;text-align:center;background:#f3f4f6;color:#1e1b4b;border-radius:12px">${otp}</div>
-            <p>This OTP expires in <b>5 minutes</b>.</p>
-            <p>If you did not request a password reset, you can safely ignore this email.</p>
-          </div>`
-      })
-    });
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.message || `Resend HTTP API failed with status ${res.status}`);
+    try {
+      const fromAddr = process.env.EMAIL_FROM || "Smart Student Portal <onboarding@resend.dev>";
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${resendApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          from: fromAddr,
+          to: [to],
+          subject: "Smart Student Portal — Password Reset OTP",
+          html: `
+            <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:16px">
+              <h2 style="color:#4f46e5">Smart Student Portal</h2>
+              <p>Use the following OTP to reset your password:</p>
+              <div style="font-size:36px;font-weight:700;letter-spacing:10px;padding:18px;text-align:center;background:#f3f4f6;color:#1e1b4b;border-radius:12px">${otp}</div>
+              <p>This OTP expires in <b>5 minutes</b>.</p>
+              <p>If you did not request a password reset, you can safely ignore this email.</p>
+            </div>`
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.id) {
+        return { provider: "Resend", id: data.id };
+      }
+      console.warn("Resend API delivery error:", data.message || data.name || res.statusText);
+    } catch (err) {
+      console.warn("Resend fetch error:", err.message);
     }
-    return true;
   }
 
-  // 2. Nodemailer SMTP Delivery (For local testing or hosts permitting outbound SMTP)
+  // 2. Brevo (Sendinblue) HTTP API
+  if (brevoApiKey) {
+    try {
+      const senderEmail = emailUser || "noreply@smartportal.edu";
+      const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": brevoApiKey,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          sender: { name: "Smart Student Portal", email: senderEmail },
+          to: [{ email: to }],
+          subject: "Smart Student Portal — Password Reset OTP",
+          htmlContent: `
+            <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:16px">
+              <h2 style="color:#4f46e5">Smart Student Portal</h2>
+              <p>Use the following OTP to reset your password:</p>
+              <div style="font-size:36px;font-weight:700;letter-spacing:10px;padding:18px;text-align:center;background:#f3f4f6;color:#1e1b4b;border-radius:12px">${otp}</div>
+              <p>This OTP expires in <b>5 minutes</b>.</p>
+            </div>`
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.messageId) {
+        return { provider: "Brevo", id: data.messageId };
+      }
+      console.warn("Brevo API delivery error:", data.message || res.statusText);
+    } catch (err) {
+      console.warn("Brevo fetch error:", err.message);
+    }
+  }
+
+  // 3. Nodemailer Gmail SMTP Delivery
   const mailer = getTransporter();
   if (!mailer) {
-    throw new Error("Email OTP service is not configured. Add RESEND_API_KEY or EMAIL_USER and EMAIL_APP_PASSWORD in environment settings.");
+    throw new Error("No valid email provider succeeded. Check RESEND_API_KEY, BREVO_API_KEY, or EMAIL_USER and EMAIL_APP_PASSWORD.");
   }
 
   const sendPromise = mailer.sendMail({
@@ -263,10 +302,10 @@ async function sendOtpEmail(to, otp) {
         <p>This OTP expires in <b>5 minutes</b>.</p>
         <p>If you did not request a password reset, you can safely ignore this email.</p>
       </div>`
-  });
+  }).then(info => ({ provider: "Nodemailer", id: info.messageId }));
 
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("SMTP connection blocked by cloud firewall. Add RESEND_API_KEY to Render for instant HTTP email delivery.")), 12000)
+    setTimeout(() => reject(new Error("SMTP connection blocked by cloud firewall. Add RESEND_API_KEY or BREVO_API_KEY for HTTP email delivery.")), 12000)
   );
 
   return Promise.race([sendPromise, timeoutPromise]);
