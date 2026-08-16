@@ -990,7 +990,7 @@ async function handleSendOtp() {
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const response = await fetch(`${API_BASE_URL}/api/reset/request-otp`, {
       method: "POST",

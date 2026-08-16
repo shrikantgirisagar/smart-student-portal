@@ -198,9 +198,9 @@ function getTransporter() {
       user: emailUser,
       pass: appPassword
     },
-    connectionTimeout: 10000,
-    greetingTimeout: 8000,
-    socketTimeout: 10000
+    connectionTimeout: 3500,
+    greetingTimeout: 2500,
+    socketTimeout: 3500
   });
   return transporter;
 }
@@ -212,7 +212,7 @@ async function sendOtpEmail(to, otp) {
     throw new Error("Email OTP service is not configured. Add EMAIL_USER and EMAIL_APP_PASSWORD in environment settings or Render dashboard.");
   }
 
-  return mailer.sendMail({
+  const sendPromise = mailer.sendMail({
     from: `"Smart Student Portal" <${emailUser}>`,
     to,
     subject: "Smart Student Portal — Password Reset OTP",
@@ -226,6 +226,12 @@ async function sendOtpEmail(to, otp) {
         <p>If you did not request a password reset, you can safely ignore this email.</p>
       </div>`
   });
+
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Email server connection timed out (4s limit)")), 4000)
+  );
+
+  return Promise.race([sendPromise, timeoutPromise]);
 }
 
 app.get("/api/status", (req, res) => {
