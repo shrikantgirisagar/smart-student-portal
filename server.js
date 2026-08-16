@@ -211,10 +211,43 @@ function getTransporter() {
 }
 
 async function sendOtpEmail(to, otp) {
+  const resendApiKey = process.env.RESEND_API_KEY;
   const emailUser = normalizeEmail(process.env.EMAIL_USER);
+
+  // 1. HTTP API Delivery via Resend (Bypasses Render cloud SMTP firewall blocks)
+  if (resendApiKey) {
+    const fromAddr = process.env.EMAIL_FROM || "Smart Student Portal <onboarding@resend.dev>";
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${resendApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: fromAddr,
+        to: [to],
+        subject: "Smart Student Portal — Password Reset OTP",
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:16px">
+            <h2 style="color:#4f46e5">Smart Student Portal</h2>
+            <p>Use the following OTP to reset your password:</p>
+            <div style="font-size:36px;font-weight:700;letter-spacing:10px;padding:18px;text-align:center;background:#f3f4f6;color:#1e1b4b;border-radius:12px">${otp}</div>
+            <p>This OTP expires in <b>5 minutes</b>.</p>
+            <p>If you did not request a password reset, you can safely ignore this email.</p>
+          </div>`
+      })
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || `Resend HTTP API failed with status ${res.status}`);
+    }
+    return true;
+  }
+
+  // 2. Nodemailer SMTP Delivery (For local testing or hosts permitting outbound SMTP)
   const mailer = getTransporter();
   if (!mailer) {
-    throw new Error("Email OTP service is not configured. Add EMAIL_USER and EMAIL_APP_PASSWORD in environment settings or Render dashboard.");
+    throw new Error("Email OTP service is not configured. Add RESEND_API_KEY or EMAIL_USER and EMAIL_APP_PASSWORD in environment settings.");
   }
 
   const sendPromise = mailer.sendMail({
@@ -233,7 +266,7 @@ async function sendOtpEmail(to, otp) {
   });
 
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("Gmail SMTP connection timed out (12s limit). Check App Password & 2FA settings.")), 12000)
+    setTimeout(() => reject(new Error("SMTP connection blocked by cloud firewall. Add RESEND_API_KEY to Render for instant HTTP email delivery.")), 12000)
   );
 
   return Promise.race([sendPromise, timeoutPromise]);
@@ -246,8 +279,9 @@ app.get("/api/status", (req, res) => {
 app.get("/api/health", (req, res) => {
   res.json({
     success: true,
-    emailConfigured: Boolean(process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD),
-    emailUser: process.env.EMAIL_USER ? process.env.EMAIL_USER.substring(0, 4) + "***" : "Not set",
+    resendConfigured: Boolean(process.env.RESEND_API_KEY),
+    emailConfigured: Boolean(process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) || Boolean(process.env.RESEND_API_KEY),
+    emailUser: process.env.EMAIL_USER ? process.env.EMAIL_USER.substring(0, 4) + "***" : (process.env.RESEND_API_KEY ? "Resend API" : "Not set"),
     databaseFile: "data/database.json"
   });
 });
