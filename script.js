@@ -271,10 +271,10 @@ async function hydrateUsersFromServer() {
     const saved = localStorage.getItem("smartPortalUsers");
     if (saved) {
       const parsed = JSON.parse(saved);
-      const hasLegacyPasswords = ["student", "faculty", "admin"].some(role =>
-        Array.isArray(parsed?.[role]) && parsed[role].some(user => user && user.password)
+      const hasLocalAccounts = ["student", "faculty", "admin"].some(role =>
+        Array.isArray(parsed?.[role]) && parsed[role].length > 0
       );
-      if (hasLegacyPasswords) {
+      if (hasLocalAccounts) {
         await fetch(`${API_BASE_URL}/api/users/migrate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -382,6 +382,17 @@ function validateUserInput({ username, password, email, role, subject, currentUs
     USERS[(role === "student" ? "faculty" : "student")].some(u => u.username.toLowerCase() === username.toLowerCase()) ||
     USERS.admin.some(u => u.username.toLowerCase() === username.toLowerCase())) {
     return "That username is already in use.";
+  }
+
+  if (email) {
+    const normEmail = email.trim().toLowerCase();
+    const emailCheck = ["student", "faculty", "admin"].some(r =>
+      USERS[r].some(u => {
+        if (currentUsername && u.username.toLowerCase() === currentUsername.toLowerCase()) return false;
+        return (u.email || "").trim().toLowerCase() === normEmail;
+      })
+    );
+    if (emailCheck) return "That email address is already registered.";
   }
   return "";
 }
