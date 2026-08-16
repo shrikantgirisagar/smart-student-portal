@@ -918,10 +918,11 @@ document.body.appendChild(facultyEditProfileModal);
 const API_BASE_URL = window.location.protocol.startsWith("http") ? window.location.origin : "http://127.0.0.1:3000";
 
 let resetRole = "student";
-let resetUser = null;
 let resetToken = null;
+let currentResetStep = 1;
 
 function updateResetModalStep(step) {
+  currentResetStep = step;
   $("resetStepEmail").classList.toggle("hidden", step !== 1);
   $("resetStepOtp").classList.toggle("hidden", step !== 2);
   $("resetStepPassword").classList.toggle("hidden", step !== 3);
@@ -935,9 +936,9 @@ function openResetModal() {
     $("loginMessage").className = "message error";
     return;
   }
-  resetRole = currentRole;
-  resetUser = null;
+  resetRole = currentRole === "faculty" ? "faculty" : "student";
   resetToken = null;
+  currentResetStep = 1;
   $("resetEmail").value = "";
   $("resetOtp").value = "";
   $("resetNewPassword").value = "";
@@ -946,7 +947,7 @@ function openResetModal() {
     $("resetOtpNotice").textContent = "";
     $("resetOtpNotice").classList.add("hidden");
   }
-  $("resetRoleLabel").textContent = currentRole === "student" ? "STUDENT PASSWORD RESET" : "FACULTY PASSWORD RESET";
+  $("resetRoleLabel").textContent = resetRole === "student" ? "STUDENT PASSWORD RESET" : "FACULTY PASSWORD RESET";
   $("resetTitle").textContent = "Forgot Password";
   updateResetModalStep(1);
   resetModal.classList.remove("hidden");
@@ -955,17 +956,13 @@ function openResetModal() {
 function closeResetModal() {
   resetModal.classList.add("hidden");
   resetToken = null;
+  currentResetStep = 1;
 }
 
 function setResetMessage(text, type = "error") {
   const el = $("resetMessage");
   el.textContent = text;
   el.className = `message ${type}`;
-}
-
-function findUserByEmail(role, email) {
-  const normalized = email.trim().toLowerCase();
-  return USERS[role].find(u => (u.email || "").toLowerCase() === normalized);
 }
 
 async function handleSendOtp() {
@@ -975,14 +972,11 @@ async function handleSendOtp() {
     return;
   }
 
-  const user = findUserByEmail(resetRole, email);
-  if (!user) {
-    setResetMessage("No account found with that email address.");
-    return;
-  }
-
   const button = $("sendOtpBtn");
+  const origText = button.innerHTML;
   button.disabled = true;
+  button.innerHTML = `<span>Sending OTP...</span><span class="arrow">⏳</span>`;
+
   try {
     const response = await fetch(`${API_BASE_URL}/api/reset/request-otp`, {
       method: "POST",
@@ -992,11 +986,10 @@ async function handleSendOtp() {
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.message || "Failed to send OTP.");
 
-    resetUser = user;
     setResetMessage("OTP sent to your registered email address.", "success");
     updateResetModalStep(2);
     if ($("resetOtpNotice")) {
-      $("resetOtpNotice").textContent = "OTP sent. Please check your email inbox and spam/junk folder.";
+      $("resetOtpNotice").textContent = "OTP sent! Check your email inbox and spam folder.";
       $("resetOtpNotice").classList.remove("hidden");
     }
   } catch (error) {
@@ -1004,6 +997,7 @@ async function handleSendOtp() {
     setResetMessage(error.message || "Unable to send OTP. Please try again later.");
   } finally {
     button.disabled = false;
+    button.innerHTML = origText;
   }
 }
 
@@ -1015,6 +1009,11 @@ async function handleVerifyOtp() {
     return;
   }
 
+  const button = $("verifyOtpBtn");
+  const origText = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = `<span>Verifying OTP...</span><span class="arrow">⏳</span>`;
+
   try {
     const response = await fetch(`${API_BASE_URL}/api/reset/verify-otp`, {
       method: "POST",
@@ -1025,12 +1024,15 @@ async function handleVerifyOtp() {
     if (!response.ok || !data.success) throw new Error(data.message || "OTP is incorrect.");
 
     resetToken = data.resetToken;
-    setResetMessage("OTP verified. Enter your new password below.", "success");
+    setResetMessage("OTP verified successfully. Enter your new password below.", "success");
     if ($("resetOtpNotice")) $("resetOtpNotice").classList.add("hidden");
     updateResetModalStep(3);
   } catch (error) {
     console.error("OTP verify error:", error);
     setResetMessage(error.message || "Unable to verify OTP. Please try again later.");
+  } finally {
+    button.disabled = false;
+    button.innerHTML = origText;
   }
 }
 
@@ -1045,10 +1047,15 @@ async function handleUpdatePassword() {
     setResetMessage("New Password and Re-enter Password must match.");
     return;
   }
-  if (!resetUser || !resetToken) {
+  if (!resetToken) {
     setResetMessage("Your password reset session has expired. Please request a new OTP.");
     return;
   }
+
+  const button = $("updatePasswordBtn");
+  const origText = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = `<span>Updating Password...</span><span class="arrow">⏳</span>`;
 
   try {
     const response = await fetch(`${API_BASE_URL}/api/reset/password`, {
@@ -1059,11 +1066,14 @@ async function handleUpdatePassword() {
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.message || "Failed to update password.");
 
-    setResetMessage("Password updated successfully. You can now sign in.", "success");
-    setTimeout(closeResetModal, 900);
+    setResetMessage("Password updated successfully! You can now sign in with your new password.", "success");
+    setTimeout(closeResetModal, 1200);
   } catch (error) {
     console.error("Password update error:", error);
     setResetMessage(error.message || "Unable to update password. Please try again later.");
+  } finally {
+    button.disabled = false;
+    button.innerHTML = origText;
   }
 }
 
@@ -1074,6 +1084,16 @@ function bindResetEvents() {
   $("sendOtpBtn").addEventListener("click", handleSendOtp);
   $("verifyOtpBtn").addEventListener("click", handleVerifyOtp);
   $("updatePasswordBtn").addEventListener("click", handleUpdatePassword);
+
+  const resetForm = $("resetForm");
+  if (resetForm) {
+    resetForm.addEventListener("submit", e => {
+      e.preventDefault();
+      if (currentResetStep === 1) handleSendOtp();
+      else if (currentResetStep === 2) handleVerifyOtp();
+      else if (currentResetStep === 3) handleUpdatePassword();
+    });
+  }
 }
 
 bindResetEvents();

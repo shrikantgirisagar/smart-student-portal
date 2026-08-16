@@ -7,9 +7,26 @@
       "username": "admin",
       "email": "",
       "subject": "",
-      "passwordHash": "scrypt$16384$8$1$3VCXAOyZXU7j80dppT4A7Q$I0DEiMk6irJQTeBH5R99zZ63oxmq7gw-uJhAvRckhe9mAUbeAUpUyNDiTnxwN17g3R2fnI-gwYs9YKONp7LciA",
+      "passwordHash": "scrypt$16384$8$1$syhcnMeTZEghLTQlAj8hkg$kfCDTjhdLFxZtzyJotzPK-jjdyhniZ48s-c72wEEh-mLPmiVpf3SbhvNG7retuGaIJmjxnqejZeFfYr7fqekjg",
       "createdAt": "2026-08-13T00:00:00.000Z",
-      "updatedAt": "2026-08-16T16:41:40.526Z"
+      "updatedAt": "2026-08-16T18:28:14.793Z"
+    },
+    {
+      "id": "student-a8e8b7599c05bc92",
+      "role": "student",
+      "name": "Test Student",
+      "username": "teststudent",
+      "email": "teststudent@example.com",
+      "subject": "",
+      "passwordHash": "scrypt$16384$8$1$GGND7YHwYB2f2XT15DpNow$SMWAZIW8NsIF99wBUTsrKzcPb6WhBWStNC5sVBjf8zjp8FSnLmmYOK2tugg4tt9rbtTFRZorIpX15h_5Zbfs_g",
+      "createdAt": "2026-08-16T18:27:35.646Z",
+      "updatedAt": "2026-08-16T18:27:35.646Z",
+      "division": "",
+      "semester": "",
+      "courseYear": "",
+      "course": "Bachelor of Computer Applications (BCA)",
+      "languageChoice": "",
+      "mathChoice": "Mathematics"
     }
   ]
 }

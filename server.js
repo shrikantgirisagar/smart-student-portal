@@ -206,7 +206,7 @@ async function sendOtpEmail(to, otp) {
   const emailUser = normalizeEmail(process.env.EMAIL_USER);
   const mailer = getTransporter();
   if (!mailer) {
-    throw new Error("Email OTP is not configured. Add EMAIL_USER and EMAIL_APP_PASSWORD to server/.env.");
+    throw new Error("Email OTP service is not configured. Add EMAIL_USER and EMAIL_APP_PASSWORD in environment settings or Render dashboard.");
   }
 
   return mailer.sendMail({
