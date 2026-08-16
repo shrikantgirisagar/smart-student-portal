@@ -193,16 +193,14 @@ function getTransporter() {
   if (!emailUser || !appPassword) return null;
 
   transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
+    service: "gmail",
     auth: {
       user: emailUser,
       pass: appPassword
     },
-    connectionTimeout: 5000,
-    greetingTimeout: 4000,
-    socketTimeout: 5000
+    connectionTimeout: 10000,
+    greetingTimeout: 8000,
+    socketTimeout: 10000
   });
   return transporter;
 }
