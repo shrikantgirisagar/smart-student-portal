@@ -7,9 +7,9 @@
       "username": "admin",
       "email": "",
       "subject": "",
-      "passwordHash": "scrypt$16384$8$1$syhcnMeTZEghLTQlAj8hkg$kfCDTjhdLFxZtzyJotzPK-jjdyhniZ48s-c72wEEh-mLPmiVpf3SbhvNG7retuGaIJmjxnqejZeFfYr7fqekjg",
+      "passwordHash": "scrypt$16384$8$1$00hIbLIxxpWNDW8UG8qaYA$IJR7mtXbSj1D84Tv3F4Z3YI4kiAtQQLP71g1ogeAyKbSEUE6Onbxq2Idn7cn40pXvJCzEBvHpZ5eLbscSGc5vw",
       "createdAt": "2026-08-13T00:00:00.000Z",
-      "updatedAt": "2026-08-16T18:28:14.793Z"
+      "updatedAt": "2026-08-16T18:54:35.449Z"
     },
     {
       "id": "student-a8e8b7599c05bc92",
