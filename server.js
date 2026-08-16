@@ -193,14 +193,19 @@ function getTransporter() {
   if (!emailUser || !appPassword) return null;
 
   transporter = nodemailer.createTransport({
-    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
     auth: {
       user: emailUser,
       pass: appPassword
     },
-    connectionTimeout: 3500,
-    greetingTimeout: 2500,
-    socketTimeout: 3500
+    connectionTimeout: 12000,
+    greetingTimeout: 10000,
+    socketTimeout: 12000,
+    tls: {
+      rejectUnauthorized: false
+    }
   });
   return transporter;
 }
@@ -219,16 +224,16 @@ async function sendOtpEmail(to, otp) {
     text: `Your Smart Student Portal password reset OTP is ${otp}. It is valid for 5 minutes. If you did not request this, ignore this email.`,
     html: `
       <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:16px">
-        <h2>Smart Student Portal</h2>
+        <h2 style="color:#4f46e5">Smart Student Portal</h2>
         <p>Use the following OTP to reset your password:</p>
-        <div style="font-size:32px;font-weight:700;letter-spacing:8px;padding:18px;text-align:center;background:#f3f4f6;border-radius:12px">${otp}</div>
+        <div style="font-size:36px;font-weight:700;letter-spacing:10px;padding:18px;text-align:center;background:#f3f4f6;color:#1e1b4b;border-radius:12px">${otp}</div>
         <p>This OTP expires in <b>5 minutes</b>.</p>
         <p>If you did not request a password reset, you can safely ignore this email.</p>
       </div>`
   });
 
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("Email server connection timed out (4s limit)")), 4000)
+    setTimeout(() => reject(new Error("Gmail SMTP connection timed out (12s limit). Check App Password & 2FA settings.")), 12000)
   );
 
   return Promise.race([sendPromise, timeoutPromise]);
@@ -242,8 +247,21 @@ app.get("/api/health", (req, res) => {
   res.json({
     success: true,
     emailConfigured: Boolean(process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD),
+    emailUser: process.env.EMAIL_USER ? process.env.EMAIL_USER.substring(0, 4) + "***" : "Not set",
     databaseFile: "data/database.json"
   });
+});
+
+app.get("/api/test-email", async (req, res) => {
+  try {
+    const to = req.query.to || process.env.EMAIL_USER;
+    if (!to) return res.status(400).json({ success: false, message: "Provide ?to=your@email.com" });
+    const info = await sendOtpEmail(to, "123456");
+    res.json({ success: true, message: "Test OTP email sent successfully!", info });
+  } catch (error) {
+    console.error("Test email error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 app.get("/api/users/public", (req, res) => {
