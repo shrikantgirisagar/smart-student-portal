@@ -1220,7 +1220,15 @@ $("signupForm").addEventListener("submit", async e => {
       $("signupMessage").textContent = "Account updated successfully.";
       $("signupMessage").className = "message success";
     } else {
-      const created = await createUserOnServer({ name, username, password, email, role, subject });
+      const created = await createUserOnServer({
+        name, username, password, email, role, subject,
+        division: "Div A",
+        semester: "3rd Semester",
+        courseYear: "2nd Year",
+        course: "Bachelor of Computer Applications (BCA)",
+        languageChoice: "",
+        mathChoice: "Mathematics"
+      });
       USERS[role].push(created);
       saveUsers();
       $("signupMessage").textContent = "Account created successfully. You can now sign in.";

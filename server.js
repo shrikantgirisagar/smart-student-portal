@@ -269,7 +269,16 @@ app.post("/api/users/migrate", async (req, res) => {
           if (!existing.email && item.email) existing.email = normalizeEmail(item.email);
           if (!existing.name && item.name) existing.name = String(item.name).trim();
           if (!existing.subject && item.subject) existing.subject = item.subject;
+          if (!existing.department && item.department) existing.department = item.department;
           if (!existing.passwordHash && item.password) existing.passwordHash = await hashPassword(item.password);
+          if (role === "student") {
+            if (!existing.division && item.division) existing.division = item.division;
+            if (!existing.semester && item.semester) existing.semester = item.semester;
+            if (!existing.courseYear && item.courseYear) existing.courseYear = item.courseYear;
+            if (!existing.course && item.course) existing.course = item.course;
+            if (!existing.languageChoice && item.languageChoice) existing.languageChoice = item.languageChoice;
+            if (!existing.mathChoice && item.mathChoice) existing.mathChoice = item.mathChoice;
+          }
           existing.updatedAt = new Date().toISOString();
           updated++;
           continue;
@@ -288,6 +297,14 @@ app.post("/api/users/migrate", async (req, res) => {
           createdAt: now,
           updatedAt: now
         };
+        if (role === "student") {
+          newUser.division = String(item.division || "Div A").trim();
+          newUser.semester = String(item.semester || "3rd Semester").trim();
+          newUser.courseYear = String(item.courseYear || "2nd Year").trim();
+          newUser.course = String(item.course || "Bachelor of Computer Applications (BCA)").trim();
+          newUser.languageChoice = String(item.languageChoice || "").trim();
+          newUser.mathChoice = String(item.mathChoice || "Mathematics").trim();
+        }
         current.users.push(newUser);
         added++;
       }
