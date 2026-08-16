@@ -1,0 +1,15 @@
+{
+  "users": [
+    {
+      "id": "admin-001",
+      "role": "admin",
+      "name": "Administrator",
+      "username": "admin",
+      "email": "",
+      "subject": "",
+      "passwordHash": "scrypt$16384$8$1$Iz9ttUTVYM3-PibIHBgsBw$yTMt_kleUb_38zRDHoA3Jyp5aWsgTwvOWRxr8LYt5lcttljXBDbVPocN3_mLhLpnefvDAxSAOpn7qS3AKtemtA",
+      "createdAt": "2026-08-13T00:00:00.000Z",
+      "updatedAt": "2026-08-16T15:47:21.760Z"
+    }
+  ]
+}
