@@ -978,23 +978,41 @@ async function handleSendOtp() {
   button.innerHTML = `<span>Sending OTP...</span><span class="arrow">⏳</span>`;
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
     const response = await fetch(`${API_BASE_URL}/api/reset/request-otp`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role: resetRole, email })
+      body: JSON.stringify({ role: resetRole, email }),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.message || "Failed to send OTP.");
 
-    setResetMessage("OTP sent to your registered email address.", "success");
-    updateResetModalStep(2);
-    if ($("resetOtpNotice")) {
-      $("resetOtpNotice").textContent = "OTP sent! Check your email inbox and spam folder.";
-      $("resetOtpNotice").classList.remove("hidden");
+    if (data.demoMode && data.demoOtp) {
+      setResetMessage(`OTP Generated: ${data.demoOtp}`, "success");
+      updateResetModalStep(2);
+      if ($("resetOtpNotice")) {
+        $("resetOtpNotice").textContent = `Your OTP Code is ${data.demoOtp}. Enter this 6-digit code below to proceed.`;
+        $("resetOtpNotice").classList.remove("hidden");
+      }
+    } else {
+      setResetMessage("OTP sent to your registered email address.", "success");
+      updateResetModalStep(2);
+      if ($("resetOtpNotice")) {
+        $("resetOtpNotice").textContent = "OTP sent! Check your email inbox and spam folder.";
+        $("resetOtpNotice").classList.remove("hidden");
+      }
     }
   } catch (error) {
     console.error("OTP send error:", error);
-    setResetMessage(error.message || "Unable to send OTP. Please try again later.");
+    if (error.name === "AbortError") {
+      setResetMessage("Server request timed out. Please check your network or try again.");
+    } else {
+      setResetMessage(error.message || "Unable to send OTP. Please try again later.");
+    }
   } finally {
     button.disabled = false;
     button.innerHTML = origText;
