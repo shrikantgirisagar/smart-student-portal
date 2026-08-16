@@ -7,7 +7,7 @@ where node >nul 2>nul
 if errorlevel 1 (
   echo.
   echo Node.js is not installed or is not in PATH.
-  echo Install Node.js, restart Windows/VS Code, and run this file again.
+  echo Install Node.js, restart Windows / Antigravity IDE, and run this file again.
   pause
   exit /b 1
 )

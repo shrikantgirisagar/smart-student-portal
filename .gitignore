@@ -10,5 +10,5 @@ node_modules/
 # OS/editor files
 .DS_Store
 Thumbs.db
-.vscode/*
-!.vscode/extensions.json
+.antigravity/*
+!.antigravity/extensions.json
