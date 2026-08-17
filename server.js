@@ -139,7 +139,6 @@ const db = readDatabase();
 // These values are only used once to initialize the supplied database file.
 const STARTER_PASSWORDS = {
   "admin:admin": "admin@123",
-  "student:student01": "stud1234",
   "faculty:faculty01": "fac1234"
 };
 

@@ -24,23 +24,6 @@
       "updatedAt": "2026-08-17T12:34:00.000Z"
     },
     {
-      "id": "student-a8e8b7599c05bc92",
-      "role": "student",
-      "name": "Test Student",
-      "username": "student01",
-      "email": "student01@smartportal.edu",
-      "subject": "",
-      "passwordHash": "scrypt$16384$8$1$GGND7YHwYB2f2XT15DpNow$SMWAZIW8NsIF99wBUTsrKzcPb6WhBWStNC5sVBjf8zjp8FSnLmmYOK2tugg4tt9rbtTFRZorIpX15h_5Zbfs_g",
-      "createdAt": "2026-08-16T18:27:35.646Z",
-      "updatedAt": "2026-08-17T12:34:00.000Z",
-      "division": "",
-      "semester": "",
-      "courseYear": "",
-      "course": "",
-      "languageChoice": "",
-      "mathChoice": ""
-    },
-    {
       "id": "student-5c0c9e09b83e4623",
       "role": "student",
       "name": "Shrikant",
