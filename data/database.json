@@ -12,18 +12,6 @@
       "updatedAt": "2026-08-17T12:34:00.000Z"
     },
     {
-      "id": "faculty-001",
-      "role": "faculty",
-      "name": "Faculty Advisor",
-      "username": "faculty01",
-      "email": "faculty01@smartportal.edu",
-      "subject": "python",
-      "department": "Department of Computer Science & Applications",
-      "passwordHash": "scrypt$16384$8$1$00hIbLIxxpWNDW8UG8qaYA$IJR7mtXbSj1D84Tv3F4Z3YI4kiAtQQLP71g1ogeAyKbSEUE6Onbxq2Idn7cn40pXvJCzEBvHpZ5eLbscSGc5vw",
-      "createdAt": "2026-08-13T00:00:00.000Z",
-      "updatedAt": "2026-08-17T12:34:00.000Z"
-    },
-    {
       "id": "student-5c0c9e09b83e4623",
       "role": "student",
       "name": "Shrikant",

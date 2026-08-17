@@ -138,8 +138,7 @@ const db = readDatabase();
 // Backfill hashes for the three starter accounts if the ZIP contains the original demo passwords.
 // These values are only used once to initialize the supplied database file.
 const STARTER_PASSWORDS = {
-  "admin:admin": "admin@123",
-  "faculty:faculty01": "fac1234"
+  "admin:admin": "admin@123"
 };
 
 (async () => {
