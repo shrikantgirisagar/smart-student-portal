@@ -9,58 +9,7 @@
       "subject": "",
       "passwordHash": "scrypt$16384$8$1$00hIbLIxxpWNDW8UG8qaYA$IJR7mtXbSj1D84Tv3F4Z3YI4kiAtQQLP71g1ogeAyKbSEUE6Onbxq2Idn7cn40pXvJCzEBvHpZ5eLbscSGc5vw",
       "createdAt": "2026-08-13T00:00:00.000Z",
-      "updatedAt": "2026-08-17T12:34:00.000Z"
-    },
-    {
-      "id": "student-5c0c9e09b83e4623",
-      "role": "student",
-      "name": "Shrikant",
-      "username": "0001",
-      "email": "shrikantgirisagar@gmail.com",
-      "subject": "",
-      "passwordHash": "scrypt$16384$8$1$GGND7YHwYB2f2XT15DpNow$SMWAZIW8NsIF99wBUTsrKzcPb6WhBWStNC5sVBjf8zjp8FSnLmmYOK2tugg4tt9rbtTFRZorIpX15h_5Zbfs_g",
-      "createdAt": "2026-08-16T18:11:45.878Z",
-      "updatedAt": "2026-08-17T12:34:00.000Z",
-      "division": "Div A",
-      "semester": "3rd Semester",
-      "courseYear": "2nd Year",
-      "course": "Bachelor of Computer Applications (BCA)",
-      "languageChoice": "Kannada",
-      "mathChoice": "Mathematics"
-    },
-    {
-      "id": "student-9a0c6fb903932832",
-      "role": "student",
-      "name": "akash",
-      "username": "0002",
-      "email": "kumarislivefan@gmail.com",
-      "subject": "",
-      "passwordHash": "scrypt$16384$8$1$GGND7YHwYB2f2XT15DpNow$SMWAZIW8NsIF99wBUTsrKzcPb6WhBWStNC5sVBjf8zjp8FSnLmmYOK2tugg4tt9rbtTFRZorIpX15h_5Zbfs_g",
-      "createdAt": "2026-08-16T19:03:28.229Z",
-      "updatedAt": "2026-08-17T12:34:00.000Z",
-      "division": "",
-      "semester": "",
-      "courseYear": "",
-      "course": "",
-      "languageChoice": "",
-      "mathChoice": ""
-    },
-    {
-      "id": "student-5be8c793f5d0e273",
-      "role": "student",
-      "name": "Ram",
-      "username": "0003",
-      "email": "shrikantgirisagar0@gmail.com",
-      "subject": "",
-      "passwordHash": "scrypt$16384$8$1$GGND7YHwYB2f2XT15DpNow$SMWAZIW8NsIF99wBUTsrKzcPb6WhBWStNC5sVBjf8zjp8FSnLmmYOK2tugg4tt9rbtTFRZorIpX15h_5Zbfs_g",
-      "createdAt": "2026-08-16T19:10:18.622Z",
-      "updatedAt": "2026-08-17T12:34:00.000Z",
-      "division": "",
-      "semester": "",
-      "courseYear": "",
-      "course": "",
-      "languageChoice": "",
-      "mathChoice": ""
+      "updatedAt": "2026-08-17T12:45:00.000Z"
     }
   ]
 }
