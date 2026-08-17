@@ -2,7 +2,6 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-const nodemailer = require("nodemailer");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -24,10 +23,6 @@ app.get("/database.js", (req, res) => res.sendFile(path.join(__dirname, "databas
 app.get("/script.js", (req, res) => res.sendFile(path.join(__dirname, "script.js")));
 
 const scryptAsync = promisify(crypto.scrypt);
-const OTP_TTL_MS = 5 * 60 * 1000;
-const RESET_TOKEN_TTL_MS = 10 * 60 * 1000;
-const MAX_OTP_ATTEMPTS = 5;
-const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 
 function ensureDatabase() {
   const dir = path.dirname(DB_FILE);
@@ -167,149 +162,7 @@ const STARTER_PASSWORDS = {
   if (changed) writeDatabase(db);
 })().catch(error => console.error("Starter database setup error:", error.message));
 
-const otpChallenges = new Map();
-const resetTokens = new Map();
 
-function hashToken(value) {
-  return crypto.createHash("sha256").update(value).digest("hex");
-}
-
-function cleanupChallenges() {
-  const now = Date.now();
-  for (const [key, challenge] of otpChallenges) {
-    if (challenge.expiresAt < now || challenge.cooldownUntil < now && challenge.used) otpChallenges.delete(key);
-  }
-  for (const [key, token] of resetTokens) {
-    if (token.expiresAt < now || token.used) resetTokens.delete(key);
-  }
-}
-setInterval(cleanupChallenges, 60 * 1000).unref();
-
-let transporter = null;
-function getTransporter() {
-  if (transporter) return transporter;
-  const emailUser = normalizeEmail(process.env.EMAIL_USER);
-  const appPassword = String(process.env.EMAIL_APP_PASSWORD || "").replace(/\s/g, "");
-  if (!emailUser || !appPassword) return null;
-
-  transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 587,
-    secure: false,
-    auth: {
-      user: emailUser,
-      pass: appPassword
-    },
-    connectionTimeout: 12000,
-    greetingTimeout: 10000,
-    socketTimeout: 12000,
-    tls: {
-      rejectUnauthorized: false
-    }
-  });
-  return transporter;
-}
-
-async function sendOtpEmail(to, otp) {
-  const resendApiKey = process.env.RESEND_API_KEY ? process.env.RESEND_API_KEY.trim() : "";
-  const brevoApiKey = process.env.BREVO_API_KEY ? process.env.BREVO_API_KEY.trim() : "";
-  const emailUser = normalizeEmail(process.env.EMAIL_USER);
-
-  // 1. Resend HTTP API
-  if (resendApiKey) {
-    try {
-      const fromAddr = process.env.EMAIL_FROM || "Smart Student Portal <onboarding@resend.dev>";
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${resendApiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          from: fromAddr,
-          to: [to],
-          subject: "Smart Student Portal — Password Reset OTP",
-          html: `
-            <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:16px">
-              <h2 style="color:#4f46e5">Smart Student Portal</h2>
-              <p>Use the following OTP to reset your password:</p>
-              <div style="font-size:36px;font-weight:700;letter-spacing:10px;padding:18px;text-align:center;background:#f3f4f6;color:#1e1b4b;border-radius:12px">${otp}</div>
-              <p>This OTP expires in <b>5 minutes</b>.</p>
-              <p>If you did not request a password reset, you can safely ignore this email.</p>
-            </div>`
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.id) {
-        return { provider: "Resend", id: data.id };
-      }
-      console.warn("Resend API delivery error:", data.message || data.name || res.statusText);
-    } catch (err) {
-      console.warn("Resend fetch error:", err.message);
-    }
-  }
-
-  // 2. Brevo (Sendinblue) HTTP API
-  if (brevoApiKey) {
-    try {
-      const senderEmail = emailUser || "noreply@smartportal.edu";
-      const res = await fetch("https://api.brevo.com/v3/smtp/email", {
-        method: "POST",
-        headers: {
-          "api-key": brevoApiKey,
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
-        body: JSON.stringify({
-          sender: { name: "Smart Student Portal", email: senderEmail },
-          to: [{ email: to }],
-          subject: "Smart Student Portal — Password Reset OTP",
-          htmlContent: `
-            <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:16px">
-              <h2 style="color:#4f46e5">Smart Student Portal</h2>
-              <p>Use the following OTP to reset your password:</p>
-              <div style="font-size:36px;font-weight:700;letter-spacing:10px;padding:18px;text-align:center;background:#f3f4f6;color:#1e1b4b;border-radius:12px">${otp}</div>
-              <p>This OTP expires in <b>5 minutes</b>.</p>
-            </div>`
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.messageId) {
-        return { provider: "Brevo", id: data.messageId };
-      }
-      console.warn("Brevo API delivery error:", data.message || res.statusText);
-    } catch (err) {
-      console.warn("Brevo fetch error:", err.message);
-    }
-  }
-
-  // 3. Nodemailer Gmail SMTP Delivery
-  const mailer = getTransporter();
-  if (!mailer) {
-    throw new Error("No valid email provider succeeded. Check RESEND_API_KEY, BREVO_API_KEY, or EMAIL_USER and EMAIL_APP_PASSWORD.");
-  }
-
-  const sendPromise = mailer.sendMail({
-    from: `"Smart Student Portal" <${emailUser}>`,
-    to,
-    subject: "Smart Student Portal — Password Reset OTP",
-    text: `Your Smart Student Portal password reset OTP is ${otp}. It is valid for 5 minutes. If you did not request this, ignore this email.`,
-    html: `
-      <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:16px">
-        <h2 style="color:#4f46e5">Smart Student Portal</h2>
-        <p>Use the following OTP to reset your password:</p>
-        <div style="font-size:36px;font-weight:700;letter-spacing:10px;padding:18px;text-align:center;background:#f3f4f6;color:#1e1b4b;border-radius:12px">${otp}</div>
-        <p>This OTP expires in <b>5 minutes</b>.</p>
-        <p>If you did not request a password reset, you can safely ignore this email.</p>
-      </div>`
-  }).then(info => ({ provider: "Nodemailer", id: info.messageId }));
-
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("SMTP connection blocked by cloud firewall. Add RESEND_API_KEY or BREVO_API_KEY for HTTP email delivery.")), 12000)
-  );
-
-  return Promise.race([sendPromise, timeoutPromise]);
-}
 
 app.get("/api/status", (req, res) => {
   res.json({ success: true, message: "Smart Student Portal backend is running." });
@@ -318,23 +171,8 @@ app.get("/api/status", (req, res) => {
 app.get("/api/health", (req, res) => {
   res.json({
     success: true,
-    resendConfigured: Boolean(process.env.RESEND_API_KEY),
-    emailConfigured: Boolean(process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) || Boolean(process.env.RESEND_API_KEY),
-    emailUser: process.env.EMAIL_USER ? process.env.EMAIL_USER.substring(0, 4) + "***" : (process.env.RESEND_API_KEY ? "Resend API" : "Not set"),
     databaseFile: "data/database.json"
   });
-});
-
-app.get("/api/test-email", async (req, res) => {
-  try {
-    const to = req.query.to || process.env.EMAIL_USER;
-    if (!to) return res.status(400).json({ success: false, message: "Provide ?to=your@email.com" });
-    const info = await sendOtpEmail(to, "123456");
-    res.json({ success: true, message: "Test OTP email sent successfully!", info });
-  } catch (error) {
-    console.error("Test email error:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
 });
 
 app.get("/api/users/public", (req, res) => {
@@ -542,145 +380,7 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-app.post("/api/reset/request-otp", async (req, res) => {
-  try {
-    const { role, email } = req.body || {};
-    const normalized = normalizeEmail(email);
-    if (!["student", "faculty"].includes(role) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
-      return res.status(400).json({ success: false, message: "Provide a valid registered email address." });
-    }
-
-    const current = readDatabase();
-    const account = findUserByEmail(current, role, normalized);
-    if (!account) return res.status(404).json({ success: false, message: "No account found with that email address." });
-
-    const existing = otpChallenges.get(`${role}:${normalized}`);
-    if (existing && existing.cooldownUntil > Date.now()) {
-      const seconds = Math.ceil((existing.cooldownUntil - Date.now()) / 1000);
-      return res.status(429).json({ success: false, message: `Please wait ${seconds} seconds before requesting another OTP.` });
-    }
-
-    const otp = String(crypto.randomInt(100000, 1000000));
-    const challenge = {
-      role,
-      email: normalized,
-      userId: account.id,
-      otpHash: hashToken(otp),
-      expiresAt: Date.now() + OTP_TTL_MS,
-      cooldownUntil: Date.now() + OTP_RESEND_COOLDOWN_MS,
-      attempts: 0,
-      used: false
-    };
-    otpChallenges.set(`${role}:${normalized}`, challenge);
-
-    let emailSent = false;
-    let emailErr = "";
-    if (process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
-      try {
-        await sendOtpEmail(normalized, otp);
-        emailSent = true;
-      } catch (err) {
-        console.error("Email delivery failed:", err.message);
-        emailErr = err.message;
-      }
-    } else {
-      console.warn("EMAIL_USER or EMAIL_APP_PASSWORD not set in environment.");
-    }
-
-    if (emailSent) {
-      res.json({ success: true, message: "OTP sent to your registered email address." });
-    } else {
-      // Fallback demo mode so users are NEVER stuck waiting or locked out if email credentials are missing or SMTP fails
-      const reason = emailErr ? `Email service error: ${emailErr}` : "Gmail OTP credentials not set on server environment.";
-      res.json({
-        success: true,
-        demoMode: true,
-        demoOtp: otp,
-        message: `OTP Generated: ${otp}. (${reason})`
-      });
-    }
-  } catch (error) {
-    console.error("Email OTP error:", error.message || error);
-    res.status(500).json({ success: false, message: error.message || "Unable to process OTP request." });
-  }
-});
-
-app.post("/api/reset/verify-otp", (req, res) => {
-  try {
-    const { role, email, otp } = req.body || {};
-    const normalized = normalizeEmail(email);
-    const key = `${role}:${normalized}`;
-    const challenge = otpChallenges.get(key);
-
-    if (!challenge || challenge.expiresAt < Date.now() || challenge.used) {
-      otpChallenges.delete(key);
-      return res.status(400).json({ success: false, message: "OTP expired or not requested." });
-    }
-    if (!/^\d{6}$/.test(String(otp || ""))) return res.status(400).json({ success: false, message: "Enter the 6-digit OTP." });
-
-    challenge.attempts++;
-    if (challenge.attempts > MAX_OTP_ATTEMPTS) {
-      otpChallenges.delete(key);
-      return res.status(429).json({ success: false, message: "Too many incorrect OTP attempts. Request a new OTP." });
-    }
-
-    if (hashToken(String(otp)) !== challenge.otpHash) {
-      return res.status(400).json({ success: false, message: "OTP is incorrect." });
-    }
-
-    const resetToken = crypto.randomBytes(32).toString("hex");
-    resetTokens.set(hashToken(resetToken), {
-      userId: challenge.userId,
-      expiresAt: Date.now() + RESET_TOKEN_TTL_MS,
-      used: false
-    });
-    challenge.used = true;
-    otpChallenges.delete(key);
-
-    res.json({ success: true, message: "OTP verified successfully.", resetToken });
-  } catch (error) {
-    console.error("Verify OTP error:", error);
-    res.status(500).json({ success: false, message: "Unable to verify OTP." });
-  }
-});
-
-app.post("/api/reset/password", async (req, res) => {
-  try {
-    const { resetToken, newPassword } = req.body || {};
-    if (!resetToken || !newPassword || String(newPassword).length < 6) {
-      return res.status(400).json({ success: false, message: "A valid reset token and a password of at least 6 characters are required." });
-    }
-
-    const tokenKey = hashToken(String(resetToken));
-    const token = resetTokens.get(tokenKey);
-    if (!token || token.used || token.expiresAt < Date.now()) {
-      resetTokens.delete(tokenKey);
-      return res.status(400).json({ success: false, message: "Password reset session expired. Request a new OTP." });
-    }
-
-    const current = readDatabase();
-    const user = current.users.find(item => item.id === token.userId);
-    if (!user) return res.status(404).json({ success: false, message: "Account not found." });
-
-    user.passwordHash = await hashPassword(newPassword);
-    user.updatedAt = new Date().toISOString();
-    writeDatabase(current);
-
-    token.used = true;
-    resetTokens.delete(tokenKey);
-    res.json({ success: true, message: "Password updated successfully." });
-  } catch (error) {
-    console.error("Password reset error:", error);
-    res.status(500).json({ success: false, message: "Unable to update password." });
-  }
-});
-
 app.listen(PORT, () => {
   console.log(`Smart Student Portal backend running at http://127.0.0.1:${PORT}`);
   console.log(`Database: ${DB_FILE}`);
-  if (process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
-    console.log("Email OTP: configured");
-  } else {
-    console.log("Email OTP: NOT CONFIGURED — add EMAIL_USER and EMAIL_APP_PASSWORD to server/.env");
-  }
 });

@@ -2,7 +2,7 @@
   "name": "smart-student-portal",
   "version": "1.0.0",
   "private": true,
-  "description": "Smart Student Portal with Node.js email OTP and JSON database",
+  "description": "Smart Student Portal with Express.js backend and persistent JSON database",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -12,7 +12,6 @@
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
-    "express": "^5.1.0",
-    "nodemailer": "^7.0.6"
+    "express": "^5.1.0"
   }
 }

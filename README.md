@@ -1,6 +1,6 @@
 # 🎓 Smart Student Portal — Academic Management System
 
-A modern, secure, and responsive **Smart Student Portal** web application built with HTML, CSS, JavaScript, and Node.js. Developed and maintained using **Antigravity IDE**, it features a complete Node.js backend with real email OTP password reset (via Nodemailer), secure `scrypt` password hashing, dynamic origin detection, and persistent file-based JSON storage.
+A modern, secure, and responsive **Smart Student Portal** web application built with HTML, CSS, JavaScript, and Node.js. Developed and maintained using **Antigravity IDE**, it features a complete Express.js backend with secure `scrypt` password hashing, dynamic origin detection, role-based access control, and persistent file-based JSON storage.
 
 ---
 
@@ -15,13 +15,12 @@ Start_Smart_Student_Portal/
 ├── server.js                       # Express.js backend server & API endpoints
 ├── package.json                    # Node.js project manifest & dependencies
 ├── package-lock.json               # Locked dependency tree
-├── .env                            # Environment variables (Gmail credentials & Port)
+├── .env                            # Environment variables (Server Port)
 ├── .gitignore                      # Git exclusion rules
 ├── README.md                       # Project documentation & setup guide
 ├── Start_Smart_Student_Portal.bat  # 1-Click Local Launcher (starts server + opens browser)
 ├── Stop_Smart_Student_Portal.bat   # 1-Click Stopper (terminates backend on port 3000)
 ├── Public_Online_Portal.bat        # 1-Click LocalTunnel Public Launcher for mobile data
-├── SETUP_EMAIL.bat                 # Helper script for setting up Gmail credentials
 └── data/
     └── database.json               # Persistent JSON database storing user records
 ```
@@ -31,7 +30,6 @@ Start_Smart_Student_Portal/
 ## ✨ Features
 
 - **🔐 Role-Based Access Control:** Separate interfaces and privileges for **Student**, **Faculty**, and **Admin** accounts.
-- **✉️ Real Email OTP Password Reset:** Sends 6-digit verification codes to registered emails using Nodemailer & Gmail.
 - **🔑 Server-Side Security:** Password hashing using Node.js `crypto.scrypt`. Frontend credentials and secrets are never exposed.
 - **💾 Persistent JSON Storage:** User accounts, roles, profiles, and records saved in `data/database.json`.
 - **📊 Academic Management:**
@@ -53,11 +51,8 @@ Open the extracted project folder directly in **Antigravity IDE**.
 ### 3. Configure Environment (`.env`)
 Inside **Antigravity IDE**, edit or create the `.env` file in the project root:
 ```env
-EMAIL_USER=yourgmail@gmail.com
-EMAIL_APP_PASSWORD=your-16-character-google-app-password
 PORT=3000
 ```
-> **Note:** For Gmail, use an **App Password** generated from your Google Account (requires 2-Step Verification). Do **not** use your normal Gmail password.
 
 ### 4. Install Dependencies
 In the **Antigravity IDE Terminal**, run:
@@ -110,10 +105,8 @@ To make your website **directly accessible to all students on their mobile phone
    - **Start Command:** `node server.js`
    - **Instance Type:** `Free`
 
-### Step 3: Add Environment Variables (Email OTP Config)
-Scroll down to the **Environment Variables** section on Render and add the following keys:
-- `EMAIL_USER` = `yourgmail@gmail.com`
-- `EMAIL_APP_PASSWORD` = `your-16-character-app-password`
+### Step 3: Add Environment Variables
+Scroll down to the **Environment Variables** section on Render and add:
 - `PORT` = `3000`
 
 ### Step 4: Deploy & Share with Students
@@ -139,5 +132,6 @@ The initial `data/database.json` comes preloaded with demo accounts:
 ---
 
 ## 🛡️ Security Notes
-- Never commit your `.env` file or Gmail credentials to public version control.
+- Never commit your `.env` file to public version control.
 - `data/database.json` is kept private on the server and is never exposed statically over HTTP.
+
