@@ -233,12 +233,12 @@ app.post("/api/users/migrate", async (req, res) => {
           updatedAt: now
         };
         if (role === "student") {
-          newUser.division = String(item.division || "Div A").trim();
-          newUser.semester = String(item.semester || "3rd Semester").trim();
-          newUser.courseYear = String(item.courseYear || "2nd Year").trim();
-          newUser.course = String(item.course || "Bachelor of Computer Applications (BCA)").trim();
+          newUser.division = String(item.division || "").trim();
+          newUser.semester = String(item.semester || "").trim();
+          newUser.courseYear = String(item.courseYear || "").trim();
+          newUser.course = String(item.course || "").trim();
           newUser.languageChoice = String(item.languageChoice || "").trim();
-          newUser.mathChoice = String(item.mathChoice || "Mathematics").trim();
+          newUser.mathChoice = String(item.mathChoice || "").trim();
         }
         current.users.push(newUser);
         added++;
@@ -281,9 +281,9 @@ app.post("/api/users", async (req, res) => {
       user.division = String(division || "").trim();
       user.semester = String(semester || "").trim();
       user.courseYear = String(courseYear || "").trim();
-      user.course = String(course || "Bachelor of Computer Applications (BCA)").trim();
+      user.course = String(course || "").trim();
       user.languageChoice = String(req.body.languageChoice || "").trim();
-      user.mathChoice = String(req.body.mathChoice || "Mathematics").trim();
+      user.mathChoice = String(req.body.mathChoice || "").trim();
     }
 
     current.users.push(user);

@@ -238,12 +238,12 @@ function normalizeClientUsers(data) {
 function sanitizeClientUser(user) {
   const { password, passwordHash, ...safe } = user || {};
   if (safe && safe.role === "student") {
-    safe.course = safe.course || "Bachelor of Computer Applications (BCA)";
+    safe.course = safe.course || "";
     safe.courseYear = safe.courseYear || "";
-    safe.semester = safe.semester || "3rd Semester";
-    safe.division = safe.division ? (safe.division === "Section A" || safe.division === "Division A" ? "Div A" : (safe.division === "Section B" || safe.division === "Division B" ? "Div B" : safe.division)) : "Div A";
+    safe.semester = safe.semester || "";
+    safe.division = safe.division ? (safe.division === "Section A" || safe.division === "Division A" ? "Div A" : (safe.division === "Section B" || safe.division === "Division B" ? "Div B" : safe.division)) : "";
     safe.languageChoice = safe.languageChoice || "";
-    safe.mathChoice = safe.mathChoice || "Mathematics";
+    safe.mathChoice = safe.mathChoice || "";
   }
   if (safe && safe.role === "faculty") {
     safe.department = safe.department || "Department of Computer Science & Applications";
@@ -985,12 +985,12 @@ $("signupForm").addEventListener("submit", async e => {
     } else {
       const created = await createUserOnServer({
         name, username, password, email, role, subject,
-        division: "Div A",
-        semester: "3rd Semester",
-        courseYear: "2nd Year",
-        course: "Bachelor of Computer Applications (BCA)",
+        division: "",
+        semester: "",
+        courseYear: "",
+        course: "",
         languageChoice: "",
-        mathChoice: "Mathematics"
+        mathChoice: ""
       });
       USERS[role].push(created);
       saveUsers();
@@ -1343,14 +1343,14 @@ function openEditProfileModal() {
   $("editProfileName").value = currentUser.name || "Student Name";
   $("editProfileUsername").value = currentUser.username || "Username";
   $("editProfileDivision").value = currentUser.division || "";
-  $("editProfileCourseYear").value = currentUser.courseYear || "1st Year";
+  $("editProfileCourseYear").value = currentUser.courseYear || "";
 
-  updateEditProfileSemesterOptions($("editProfileCourseYear").value, currentUser.semester);
+  updateEditProfileSemesterOptions($("editProfileCourseYear").value, currentUser.semester || "");
 
   $("editProfileCourse").value = currentUser.course || "Bachelor of Computer Applications (BCA)";
   $("editProfileEmail").value = currentUser.email || "Not provided";
   $("editProfileLanguage").value = currentUser.languageChoice || "";
-  $("editProfileMathChoice").value = currentUser.mathChoice || "Mathematics";
+  $("editProfileMathChoice").value = currentUser.mathChoice || "";
 
   $("editProfileMessage").textContent = "";
   $("editProfileMessage").className = "message";
@@ -3042,24 +3042,33 @@ const pages = {
   },
   profile() {
     if (currentUser.role === "student") {
-      const course = currentUser.course || "Bachelor of Computer Applications (BCA)";
-      const year = currentUser.courseYear || "Not set";
-      const sem = currentUser.semester || "Not set";
-      const div = currentUser.division || "Not set";
+      const course = currentUser.course || "Not Selected";
+      const year = currentUser.courseYear || "Not Selected";
+      const sem = currentUser.semester || "Not Selected";
+      const div = currentUser.division || "Not Selected";
       const email = currentUser.email || "Not provided";
-      const subtitleParts = [course, year, sem, div].filter(p => p !== "Not set");
-      const subtitleText = subtitleParts.length ? subtitleParts.join(" • ") : "Profile details pending update";
+      const isConfigured = Boolean(currentUser.courseYear && currentUser.semester && currentUser.division && currentUser.languageChoice);
+
+      const subtitleParts = [course, year, sem, div].filter(p => p !== "Not Selected");
+      const subtitleText = subtitleParts.length ? subtitleParts.join(" • ") : "Profile setup pending";
       const profileStatus = getProfileStatusMessage();
       const statusMarkup = profileStatus ? `<p id="profileStatusMessage" class="message ${profileStatus.type}">${profileStatus.message}</p>` : "";
+
+      const setupBanner = !isConfigured ? `
+        <div class="profile-notice-banner" style="background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; padding:14px 18px; border-radius:16px; margin-bottom:20px; font-size:14px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+          <div><strong>⚠️ Profile Setup Required:</strong> You haven't selected your academic details yet. Click <b>Edit Profile</b> to choose your Course Year, Semester, Division, and Language.</div>
+          <button onclick="openEditProfileModal()" class="primary-btn" style="padding:6px 14px; font-size:13px;" type="button">Edit Profile Now</button>
+        </div>` : "";
 
       const allEnrolled = getSubjectsForStudent(currentUser);
       const theorySubjects = allEnrolled.filter(s => !s.name.toLowerCase().includes("lab") && !s.id.toLowerCase().includes("lab"));
       const labSubjects = allEnrolled.filter(s => s.name.toLowerCase().includes("lab") || s.id.toLowerCase().includes("lab"));
 
-      const theorySubjectsText = theorySubjects.map(s => s.name).join(", ");
-      const labSubjectsText = labSubjects.length ? labSubjects.map(s => s.name).join(", ") : "None";
+      const theorySubjectsText = theorySubjects.length ? theorySubjects.map(s => s.name).join(", ") : "Select semester to view enrolled subjects";
+      const labSubjectsText = labSubjects.length ? labSubjects.map(s => s.name).join(", ") : (isConfigured ? "None" : "Select semester to view labs");
 
       return `<section class="panel profile">
+        ${setupBanner}
         <div class="profile-head">
           <div class="big-avatar">${currentUser.name.charAt(0).toUpperCase()}</div>
           <div class="profile-main-info">
