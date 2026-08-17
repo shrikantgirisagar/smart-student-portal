@@ -123,8 +123,9 @@ function updateEditProfileSemesterOptions(courseYear, selectedSem) {
 
 function getSubjectsForStudent(student) {
   if (!student || student.role !== "student") return SUBJECTS;
+  if (!student.semester) return [];
 
-  const sem = student.semester || "1st Semester";
+  const sem = student.semester;
   const lang = student.languageChoice;
   const mathOpt = student.mathChoice || "Mathematics";
 
@@ -3075,8 +3076,8 @@ const pages = {
       const theorySubjects = allEnrolled.filter(s => !s.name.toLowerCase().includes("lab") && !s.id.toLowerCase().includes("lab"));
       const labSubjects = allEnrolled.filter(s => s.name.toLowerCase().includes("lab") || s.id.toLowerCase().includes("lab"));
 
-      const theorySubjectsText = theorySubjects.length ? theorySubjects.map(s => s.name).join(", ") : "Select semester to view enrolled subjects";
-      const labSubjectsText = labSubjects.length ? labSubjects.map(s => s.name).join(", ") : (isConfigured ? "None" : "Select semester to view labs");
+      const theorySubjectsText = theorySubjects.length ? theorySubjects.map(s => s.name).join(", ") : (isConfigured ? "No theory subjects listed for this semester" : "Please select your semester in Edit Profile to view enrolled subjects");
+      const labSubjectsText = labSubjects.length ? labSubjects.map(s => s.name).join(", ") : (isConfigured ? "No practical lab subjects for this semester" : "Please select your semester in Edit Profile to view enrolled labs");
 
       return `<section class="panel profile">
         ${setupBanner}
@@ -3103,13 +3104,13 @@ const pages = {
           <div><small>Course</small><b>${course}</b></div>
           <div><small>Email Address</small><b>${email}</b></div>
           <div><small>Account Role</small><b>Student</b></div>
-          <div style="grid-column: 1 / -1; background: #f8fafc; padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 6px;">
-            <small style="color: #4f46e5; font-weight: 700; text-transform: uppercase; font-size: 11px; display: block; margin-bottom: 4px;">📖 Enrolled Semester Subjects (${sem})</small>
-            <b style="color: #0f172a; font-size: 14px; line-height: 1.5; display: block;">${theorySubjectsText}</b>
+          <div style="grid-column: 1 / -1; background: #f8fafc; padding: 14px 18px; border-radius: 12px; border: 1px solid #e2e8f0; margin-top: 8px;">
+            <small style="color: #4f46e5; font-weight: 700; text-transform: uppercase; font-size: 11px; display: block; margin-bottom: 6px; letter-spacing: 0.5px;">📖 Enrolled Semester Subjects (${sem})</small>
+            <b style="color: #0f172a; font-size: 14px; line-height: 1.6; display: block;">${theorySubjectsText}</b>
           </div>
-          <div style="grid-column: 1 / -1; background: #f8fafc; padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 6px;">
-            <small style="color: #0ea5e9; font-weight: 700; text-transform: uppercase; font-size: 11px; display: block; margin-bottom: 4px;">🧪 Enrolled Semester Labs (${sem})</small>
-            <b style="color: #0f172a; font-size: 14px; line-height: 1.5; display: block;">${labSubjectsText}</b>
+          <div style="grid-column: 1 / -1; background: #f0f9ff; padding: 14px 18px; border-radius: 12px; border: 1px solid #bae6fd; margin-top: 8px;">
+            <small style="color: #0284c7; font-weight: 700; text-transform: uppercase; font-size: 11px; display: block; margin-bottom: 6px; letter-spacing: 0.5px;">🧪 Enrolled Semester Labs (${sem})</small>
+            <b style="color: #0369a1; font-size: 14px; line-height: 1.6; display: block;">${labSubjectsText}</b>
           </div>
         </div>
       </section>`;
