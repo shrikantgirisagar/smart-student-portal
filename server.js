@@ -297,9 +297,10 @@ app.post("/api/users", async (req, res) => {
 app.put("/api/users/:role/:username", async (req, res) => {
   try {
     const { role, username } = req.params;
+    const decodedUsername = normalizeUsername(decodeURIComponent(username));
     const { name, newUsername, password, email, subject, department, division, semester, courseYear, course, languageChoice, mathChoice } = req.body || {};
     const current = readDatabase();
-    const user = findUser(current, role, username);
+    const user = findUser(current, role, decodedUsername);
     if (!user) return res.status(404).json({ success: false, message: "Account not found." });
 
     const nextUsername = normalizeUsername(newUsername || user.username);
@@ -389,7 +390,7 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Smart Student Portal backend running at http://127.0.0.1:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Smart Student Portal backend running on port ${PORT}`);
   console.log(`Database: ${DB_FILE}`);
 });

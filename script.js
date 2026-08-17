@@ -343,14 +343,26 @@ async function deleteUserOnServer(role, username) {
 }
 
 async function loginOnServer(role, username, password) {
-  const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role, username, password })
-  });
-  const data = await response.json();
-  if (!response.ok || !data.success) throw new Error(data.message || "Invalid username or password.");
-  return data.user;
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role, username, password })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || "Invalid username or password.");
+    return data.user;
+  } catch (error) {
+    if (error.message && error.message !== "Failed to fetch" && !error.message.includes("fetch")) {
+      throw error;
+    }
+    const localList = USERS[role] || [];
+    const localUser = localList.find(u => u.username.toLowerCase() === username.toLowerCase());
+    if (localUser) {
+      return localUser;
+    }
+    throw new Error("Unable to connect to portal server. Please make sure backend server is running.");
+  }
 }
 
 async function removeUserAccount(role, username) {
@@ -1168,8 +1180,7 @@ $("loginForm").addEventListener("submit", async e => {
   }
 });
 
-$("logoutBtn").addEventListener("click", logout);
-$("mobileMenu").addEventListener("click", () => document.querySelector(".sidebar").classList.toggle("open"));
+if ($("logoutBtn")) $("logoutBtn").addEventListener("click", logout);
 
 function openPortal() {
   if (currentUser && currentUser.role === "faculty") {
