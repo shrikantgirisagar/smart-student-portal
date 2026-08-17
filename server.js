@@ -350,12 +350,22 @@ app.delete("/api/users/:role/:username", (req, res) => {
   try {
     const { role, username } = req.params;
     if (role === "admin") return res.status(403).json({ success: false, message: "Admin accounts cannot be deleted here." });
+
+    const targetRole = String(role || "").trim().toLowerCase();
+    const targetUsername = normalizeUsername(decodeURIComponent(username));
+
     const current = readDatabase();
     const before = current.users.length;
-    current.users = current.users.filter(user => !(user.role === role && user.username.toLowerCase() === decodeURIComponent(username).toLowerCase()));
+    current.users = current.users.filter(user => {
+      const matchRole = user.role.toLowerCase() === targetRole;
+      const matchUser = normalizeUsername(user.username) === targetUsername;
+      return !(matchRole && matchUser);
+    });
+
     if (current.users.length === before) return res.status(404).json({ success: false, message: "Account not found." });
+
     writeDatabase(current);
-    res.json({ success: true, message: "Account deleted successfully." });
+    res.json({ success: true, message: "Account and details removed successfully.", remaining: current.users.length });
   } catch (error) {
     console.error("Delete user error:", error);
     res.status(500).json({ success: false, message: "Unable to delete the user." });
