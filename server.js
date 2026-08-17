@@ -201,18 +201,18 @@ app.post("/api/users/migrate", async (req, res) => {
         if (!username) continue;
         const existing = findUser(current, role, username);
         if (existing) {
-          if (!existing.email && item.email) existing.email = normalizeEmail(item.email);
-          if (!existing.name && item.name) existing.name = String(item.name).trim();
-          if (!existing.subject && item.subject) existing.subject = item.subject;
-          if (!existing.department && item.department) existing.department = item.department;
+          if (item.email) existing.email = normalizeEmail(item.email);
+          if (item.name) existing.name = String(item.name).trim();
+          if (item.subject !== undefined) existing.subject = String(item.subject).trim();
+          if (item.department !== undefined) existing.department = String(item.department).trim();
           if (!existing.passwordHash && item.password) existing.passwordHash = await hashPassword(item.password);
           if (role === "student") {
-            if (!existing.division && item.division) existing.division = item.division;
-            if (!existing.semester && item.semester) existing.semester = item.semester;
-            if (!existing.courseYear && item.courseYear) existing.courseYear = item.courseYear;
-            if (!existing.course && item.course) existing.course = item.course;
-            if (!existing.languageChoice && item.languageChoice) existing.languageChoice = item.languageChoice;
-            if (!existing.mathChoice && item.mathChoice) existing.mathChoice = item.mathChoice;
+            if (item.division !== undefined && item.division !== "") existing.division = String(item.division).trim();
+            if (item.semester !== undefined && item.semester !== "") existing.semester = String(item.semester).trim();
+            if (item.courseYear !== undefined && item.courseYear !== "") existing.courseYear = String(item.courseYear).trim();
+            if (item.course !== undefined && item.course !== "") existing.course = String(item.course).trim();
+            if (item.languageChoice !== undefined && item.languageChoice !== "") existing.languageChoice = String(item.languageChoice).trim();
+            if (item.mathChoice !== undefined && item.mathChoice !== "") existing.mathChoice = String(item.mathChoice).trim();
           }
           existing.updatedAt = new Date().toISOString();
           updated++;

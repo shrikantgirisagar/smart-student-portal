@@ -263,7 +263,18 @@ function loadUsers() {
 }
 
 function saveUsers() {
-  localStorage.setItem("smartPortalUsers", JSON.stringify(normalizeClientUsers(USERS)));
+  const data = normalizeClientUsers(USERS);
+  localStorage.setItem("smartPortalUsers", JSON.stringify(data));
+  syncUsersToServer(data);
+}
+
+function syncUsersToServer(data) {
+  if (!data) return;
+  fetch(`${API_BASE_URL}/api/users/migrate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ users: data })
+  }).catch(() => {});
 }
 
 async function hydrateUsersFromServer() {
