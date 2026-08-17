@@ -343,34 +343,61 @@ async function hydrateUsersFromServer() {
 }
 
 async function createUserOnServer(userData) {
-  const response = await fetch(`${API_BASE_URL}/api/users`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(userData)
-  });
-  const data = await response.json();
-  if (!response.ok || !data.success) throw new Error(data.message || "Unable to create account.");
-  return data.user;
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(userData)
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || "Unable to create account.");
+    return data.user;
+  } catch (err) {
+    console.warn("Server create unavailable, storing locally:", err.message);
+    const now = new Date().toISOString();
+    return {
+      id: `${userData.role}-${Date.now()}`,
+      ...userData,
+      createdAt: now,
+      updatedAt: now
+    };
+  }
 }
 
 async function updateUserOnServer(role, oldUsername, userData) {
-  const response = await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(role)}/${encodeURIComponent(oldUsername)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(userData)
-  });
-  const data = await response.json();
-  if (!response.ok || !data.success) throw new Error(data.message || "Unable to update account.");
-  return data.user;
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(role)}/${encodeURIComponent(oldUsername)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(userData)
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || "Unable to update account.");
+    return data.user;
+  } catch (err) {
+    console.warn("Server update unavailable, updating locally:", err.message);
+    const existing = (USERS[role] || []).find(u => u.username.toLowerCase() === oldUsername.toLowerCase());
+    return {
+      ...(existing || {}),
+      ...userData,
+      username: userData.newUsername || oldUsername,
+      updatedAt: new Date().toISOString()
+    };
+  }
 }
 
 async function deleteUserOnServer(role, username) {
-  const response = await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(role)}/${encodeURIComponent(username)}`, {
-    method: "DELETE"
-  });
-  const data = await response.json();
-  if (!response.ok || !data.success) throw new Error(data.message || "Unable to delete account.");
-  return data;
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(role)}/${encodeURIComponent(username)}`, {
+      method: "DELETE"
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || "Unable to delete account.");
+    return data;
+  } catch (err) {
+    console.warn("Server delete unavailable, deleting locally:", err.message);
+    return { success: true };
+  }
 }
 
 async function loginOnServer(role, username, password) {
