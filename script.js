@@ -303,6 +303,8 @@ async function hydrateUsersFromServer() {
       faculty: data.users.filter(u => u.role === "faculty"),
       admin: data.users.filter(u => u.role === "admin")
     });
+    USERS.student.forEach(s => ensureStudentRecord(s.username));
+    saveAcademicData();
     saveUsers();
   } catch (error) {
     console.warn("Database sync unavailable:", error.message);
@@ -772,6 +774,55 @@ signupModal.innerHTML = `
       <div class="input-wrap"><span class="input-icon">🔒</span><input id="signupPassword" type="password" required minlength="6" placeholder="Create a password"></div>
       <label>Email Address</label>
       <div class="input-wrap"><span class="input-icon">✉️</span><input id="signupEmail" type="email" required placeholder="Enter your email address" autocomplete="email"></div>
+      
+      <div id="studentDetailsFields">
+        <label>Course</label>
+        <div class="input-wrap"><span class="input-icon">🎓</span><input id="signupCourse" readonly value="Bachelor of Computer Applications (BCA)"></div>
+        <label>Course Year</label>
+        <div class="input-wrap">
+          <select id="signupCourseYear" required>
+            <option value="1st Year">1st Year</option>
+            <option value="2nd Year">2nd Year</option>
+            <option value="3rd Year">3rd Year</option>
+          </select>
+        </div>
+        <label>Semester</label>
+        <div class="input-wrap">
+          <select id="signupSemester" required>
+            <option value="1st Semester">1st Semester</option>
+            <option value="2nd Semester">2nd Semester</option>
+          </select>
+        </div>
+        <label>Division</label>
+        <div class="input-wrap">
+          <select id="signupDivision" required>
+            <option value="Div A">Div A</option>
+            <option value="Div B">Div B</option>
+          </select>
+        </div>
+        <label>Language Subject Choice</label>
+        <div class="input-wrap">
+          <select id="signupLanguage" required>
+            <option value="Kannada">Kannada</option>
+            <option value="Hindi">Hindi</option>
+          </select>
+        </div>
+        <div id="signupMathWrap">
+          <label>Mathematics / Accountancy Choice (1st Semester)</label>
+          <div class="input-wrap">
+            <select id="signupMathChoice">
+              <option value="Mathematics">Mathematics</option>
+              <option value="Accountancy">Accountancy</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div id="facultyDeptField" class="hidden">
+        <label>Faculty Department</label>
+        <div class="input-wrap"><span class="input-icon">🏛️</span><input id="signupDepartment" value="Department of Computer Science & Applications" placeholder="Enter department"></div>
+      </div>
+
       <div id="facultySubjectField" class="hidden">
         <label>Faculty Subject / Lab</label>
         <div class="subject-search-wrap">
@@ -782,11 +833,42 @@ signupModal.innerHTML = `
           <option value="">Choose your subject / lab</option>
         </select>
       </div>
+
       <button class="primary-btn" type="submit"><span class="submit-label">Create Account</span><span class="arrow">→</span></button>
       <p id="signupMessage" class="message"></p>
     </form>
   </div>`;
 document.body.appendChild(signupModal);
+
+function updateSignupSemesterOptions(courseYear, selectedSem) {
+  const semSelect = $("signupSemester");
+  if (!semSelect) return;
+  const validSemesters = getSemestersForCourseYear(courseYear);
+  semSelect.innerHTML = validSemesters.map(sem => `<option value="${sem}">${sem}</option>`).join("");
+  if (selectedSem && validSemesters.includes(selectedSem)) {
+    semSelect.value = selectedSem;
+  } else if (validSemesters.length) {
+    semSelect.value = validSemesters[0];
+  }
+  const is1stSem = semSelect.value === "1st Semester";
+  if ($("signupMathWrap")) {
+    $("signupMathWrap").style.display = is1stSem ? "block" : "none";
+  }
+}
+
+if ($("signupCourseYear")) {
+  $("signupCourseYear").addEventListener("change", () => {
+    updateSignupSemesterOptions($("signupCourseYear").value);
+  });
+}
+if ($("signupSemester")) {
+  $("signupSemester").addEventListener("change", () => {
+    const is1stSem = $("signupSemester").value === "1st Semester";
+    if ($("signupMathWrap")) {
+      $("signupMathWrap").style.display = is1stSem ? "block" : "none";
+    }
+  });
+}
 
 const editProfileModal = document.createElement("div");
 editProfileModal.id = "editProfileModal";
@@ -911,8 +993,18 @@ function openSignup(role, user = null) {
   $("modalIcon").textContent = role === "student" ? "🎓" : "👨‍🏫";
   $("modalRoleLabel").textContent = role === "student" ? "STUDENT ACCOUNT" : "FACULTY ACCOUNT";
   $("modalTitle").textContent = user ? (role === "student" ? "Edit Student" : "Edit Faculty") : (role === "student" ? "Student Signup" : "Faculty Signup");
-  $("facultySubjectField").classList.toggle("hidden", role !== "faculty");
+
+  const isStudent = role === "student";
+  if ($("studentDetailsFields")) $("studentDetailsFields").classList.toggle("hidden", !isStudent);
+  if ($("facultyDeptField")) $("facultyDeptField").classList.toggle("hidden", isStudent);
+  if ($("facultySubjectField")) $("facultySubjectField").classList.toggle("hidden", isStudent);
+
   $("signupSubject").required = role === "faculty";
+  if ($("signupCourseYear")) $("signupCourseYear").required = isStudent;
+  if ($("signupSemester")) $("signupSemester").required = isStudent;
+  if ($("signupDivision")) $("signupDivision").required = isStudent;
+  if ($("signupLanguage")) $("signupLanguage").required = isStudent;
+
   $("signupMessage").textContent = "";
   const usernameLabel = $("signupUsernameLabel");
   const usernameInput = $("signupUsername");
@@ -929,7 +1021,21 @@ function openSignup(role, user = null) {
   $("signupPassword").value = "";
   $("signupPassword").placeholder = user ? "Leave blank to keep current password" : "Create a password";
   $("signupEmail").value = user ? (user.email || "") : "";
-  $("signupSubject").value = user && role === "faculty" ? user.subject : "";
+
+  if (isStudent) {
+    const courseYear = user ? (user.courseYear || "1st Year") : "1st Year";
+    const sem = user ? (user.semester || "1st Semester") : "1st Semester";
+    if ($("signupCourseYear")) $("signupCourseYear").value = courseYear;
+    updateSignupSemesterOptions(courseYear, sem);
+    if ($("signupDivision")) $("signupDivision").value = user ? (user.division || "Div A") : "Div A";
+    if ($("signupLanguage")) $("signupLanguage").value = user ? (user.languageChoice || "Kannada") : "Kannada";
+    if ($("signupMathChoice")) $("signupMathChoice").value = user ? (user.mathChoice || "Mathematics") : "Mathematics";
+    if ($("signupCourse")) $("signupCourse").value = user ? (user.course || "Bachelor of Computer Applications (BCA)") : "Bachelor of Computer Applications (BCA)";
+  } else {
+    if ($("signupDepartment")) $("signupDepartment").value = user ? (user.department || "Department of Computer Science & Applications") : "Department of Computer Science & Applications";
+    if ($("signupSubject")) $("signupSubject").value = user ? user.subject : "";
+  }
+
   signupModal.classList.remove("hidden");
   const submitLabel = signupModal.querySelector(".submit-label");
   if (submitLabel) {
@@ -960,6 +1066,15 @@ $("signupForm").addEventListener("submit", async e => {
   const password = $("signupPassword").value;
   const email = $("signupEmail").value.trim().toLowerCase();
   const subject = role === "faculty" ? $("signupSubject").value : null;
+  const department = role === "faculty" ? ($("signupDepartment") ? $("signupDepartment").value.trim() : "Department of Computer Science & Applications") : null;
+
+  const course = role === "student" ? ($("signupCourse") ? $("signupCourse").value.trim() : "Bachelor of Computer Applications (BCA)") : null;
+  const courseYear = role === "student" ? ($("signupCourseYear") ? $("signupCourseYear").value : "1st Year") : null;
+  const semester = role === "student" ? ($("signupSemester") ? $("signupSemester").value : "1st Semester") : null;
+  const division = role === "student" ? ($("signupDivision") ? $("signupDivision").value : "Div A") : null;
+  const languageChoice = role === "student" ? ($("signupLanguage") ? $("signupLanguage").value : "Kannada") : null;
+  const mathChoice = role === "student" ? ($("signupMathChoice") ? $("signupMathChoice").value : "Mathematics") : null;
+
   const currentUsername = $("signupCurrentUsername").value || null;
 
   if (!currentUsername && !password) {
@@ -984,11 +1099,16 @@ $("signupForm").addEventListener("submit", async e => {
       if (!existing) throw new Error("Could not find the user to update.");
 
       const updated = await updateUserOnServer(role, currentUsername, {
-        name, newUsername: username, email, subject, password
+        name, newUsername: username, email, subject, department, password,
+        division, semester, courseYear, course, languageChoice, mathChoice
       });
 
-      if (role === "student" && currentUsername.toLowerCase() !== username.toLowerCase()) {
-        renameStudentAcademicData(currentUsername, username);
+      if (role === "student") {
+        if (currentUsername.toLowerCase() !== username.toLowerCase()) {
+          renameStudentAcademicData(currentUsername, username);
+        }
+        ensureStudentRecord(username);
+        saveAcademicData();
       }
       USERS[role] = USERS[role].map(u => u.id === existing.id || u.username.toLowerCase() === currentUsername.toLowerCase() ? updated : u);
       saveUsers();
@@ -996,15 +1116,14 @@ $("signupForm").addEventListener("submit", async e => {
       $("signupMessage").className = "message success";
     } else {
       const created = await createUserOnServer({
-        name, username, password, email, role, subject,
-        division: "",
-        semester: "",
-        courseYear: "",
-        course: "",
-        languageChoice: "",
-        mathChoice: ""
+        name, username, password, email, role, subject, department,
+        division, semester, courseYear, course, languageChoice, mathChoice
       });
       USERS[role].push(created);
+      if (role === "student") {
+        ensureStudentRecord(username);
+        saveAcademicData();
+      }
       saveUsers();
       $("signupMessage").textContent = "Account created successfully. You can now sign in.";
       $("signupMessage").className = "message success";

@@ -253,7 +253,7 @@ app.post("/api/users/migrate", async (req, res) => {
 
 app.post("/api/users", async (req, res) => {
   try {
-    const { name, username, password, email, role, subject, division, semester, courseYear, course } = req.body || {};
+    const { name, username, password, email, role, subject, department, division, semester, courseYear, course, languageChoice, mathChoice } = req.body || {};
     const validation = validateUserFields({ name, username, email, role, subject });
     if (validation) return res.status(400).json({ success: false, message: validation });
     if (!password || String(password).length < 6) return res.status(400).json({ success: false, message: "Password must contain at least 6 characters." });
@@ -270,18 +270,19 @@ app.post("/api/users", async (req, res) => {
       username: normalizeUsername(username),
       email: normalizeEmail(email),
       subject: role === "faculty" ? String(subject || "") : "",
+      department: role === "faculty" ? String(department || "Department of Computer Science & Applications").trim() : "",
       passwordHash: await hashPassword(password),
       createdAt: now,
       updatedAt: now
     };
 
     if (role === "student") {
-      user.division = String(division || "").trim();
-      user.semester = String(semester || "").trim();
-      user.courseYear = String(courseYear || "").trim();
-      user.course = String(course || "").trim();
-      user.languageChoice = String(req.body.languageChoice || "").trim();
-      user.mathChoice = String(req.body.mathChoice || "").trim();
+      user.division = String(division || "Div A").trim();
+      user.semester = String(semester || "1st Semester").trim();
+      user.courseYear = String(courseYear || "1st Year").trim();
+      user.course = String(course || "Bachelor of Computer Applications (BCA)").trim();
+      user.languageChoice = String(languageChoice || "Kannada").trim();
+      user.mathChoice = String(mathChoice || "Mathematics").trim();
     }
 
     current.users.push(user);
