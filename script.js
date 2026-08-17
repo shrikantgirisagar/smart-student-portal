@@ -151,7 +151,7 @@ function getSubjectsForStudent(student) {
     engId = "english";
   }
 
-  const langSubject = lang ? subjectById(langId) : null;
+  const langSubject = subjectById(langId);
   const engSubject = subjectById(engId);
 
   if (sem === "1st Semester") {
@@ -179,8 +179,7 @@ function getSubjectsForStudent(student) {
       subjectById("dslab"),
       subjectById("javalab")
     ].filter(Boolean);
-  } else {
-    // 3rd Semester (and fallback for 4th, 5th, 6th)
+  } else if (sem === "3rd Semester") {
     return [
       langSubject,
       engSubject,
@@ -193,6 +192,38 @@ function getSubjectsForStudent(student) {
       subjectById("pythonlab"),
       subjectById("advjavalab")
     ].filter(Boolean);
+  } else if (sem === "4th Semester") {
+    return [
+      langSubject,
+      engSubject,
+      subjectById("cn"),
+      subjectById("se"),
+      subjectById("webtech"),
+      subjectById("cnlab"),
+      subjectById("weblab")
+    ].filter(Boolean);
+  } else if (sem === "5th Semester") {
+    return [
+      langSubject,
+      engSubject,
+      subjectById("ai"),
+      subjectById("cloud"),
+      subjectById("cyber"),
+      subjectById("ailab"),
+      subjectById("cloudlab")
+    ].filter(Boolean);
+  } else if (sem === "6th Semester") {
+    return [
+      langSubject,
+      engSubject,
+      subjectById("ml"),
+      subjectById("iot"),
+      subjectById("majorproject"),
+      subjectById("mllab"),
+      subjectById("iotlab")
+    ].filter(Boolean);
+  } else {
+    return [];
   }
 }
 
@@ -3206,8 +3237,17 @@ const pages = {
       const theorySubjects = allEnrolled.filter(s => !s.name.toLowerCase().includes("lab") && !s.id.toLowerCase().includes("lab"));
       const labSubjects = allEnrolled.filter(s => s.name.toLowerCase().includes("lab") || s.id.toLowerCase().includes("lab"));
 
-      const theorySubjectsText = theorySubjects.length ? theorySubjects.map(s => s.name).join(", ") : (isConfigured ? "No theory subjects listed for this semester" : "Please select your semester in Edit Profile to view enrolled subjects");
-      const labSubjectsText = labSubjects.length ? labSubjects.map(s => s.name).join(", ") : (isConfigured ? "No practical lab subjects for this semester" : "Please select your semester in Edit Profile to view enrolled labs");
+      const theorySubjectsMarkup = theorySubjects.length
+        ? `<div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;">` +
+          theorySubjects.map(s => `<span class="subject-tag theory-tag" style="background:#eef2ff; color:#3730a3; padding:6px 14px; border-radius:10px; font-size:13px; font-weight:600; border:1px solid #c7d2fe;">📖 ${s.name} (${s.short})</span>`).join("") +
+          `</div>`
+        : `<b style="color: #64748b; font-size: 14px; display: block;">${isConfigured ? "No theory subjects listed for this semester" : "Please select your semester in Edit Profile to view enrolled subjects"}</b>`;
+
+      const labSubjectsMarkup = labSubjects.length
+        ? `<div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;">` +
+          labSubjects.map(s => `<span class="subject-tag lab-tag" style="background:#e0f2fe; color:#075985; padding:6px 14px; border-radius:10px; font-size:13px; font-weight:600; border:1px solid #bae6fd;">🧪 ${s.name} (${s.short})</span>`).join("") +
+          `</div>`
+        : `<b style="color: #64748b; font-size: 14px; display: block;">${isConfigured ? "No practical lab subjects for this semester" : "Please select your semester in Edit Profile to view enrolled labs"}</b>`;
 
       return `<section class="panel profile">
         ${setupBanner}
@@ -3234,13 +3274,13 @@ const pages = {
           <div><small>Course</small><b>${course}</b></div>
           <div><small>Email Address</small><b>${email}</b></div>
           <div><small>Account Role</small><b>Student</b></div>
-          <div style="grid-column: 1 / -1; background: #f8fafc; padding: 14px 18px; border-radius: 12px; border: 1px solid #e2e8f0; margin-top: 8px;">
-            <small style="color: #4f46e5; font-weight: 700; text-transform: uppercase; font-size: 11px; display: block; margin-bottom: 6px; letter-spacing: 0.5px;">📖 Enrolled Semester Subjects (${sem})</small>
-            <b style="color: #0f172a; font-size: 14px; line-height: 1.6; display: block;">${theorySubjectsText}</b>
+          <div style="grid-column: 1 / -1; background: #f8fafc; padding: 16px 20px; border-radius: 14px; border: 1px solid #e2e8f0; margin-top: 8px;">
+            <small style="color: #4f46e5; font-weight: 700; text-transform: uppercase; font-size: 11px; display: block; margin-bottom: 8px; letter-spacing: 0.5px;">📖 Enrolled Semester Subjects (${sem})</small>
+            ${theorySubjectsMarkup}
           </div>
-          <div style="grid-column: 1 / -1; background: #f0f9ff; padding: 14px 18px; border-radius: 12px; border: 1px solid #bae6fd; margin-top: 8px;">
-            <small style="color: #0284c7; font-weight: 700; text-transform: uppercase; font-size: 11px; display: block; margin-bottom: 6px; letter-spacing: 0.5px;">🧪 Enrolled Semester Labs (${sem})</small>
-            <b style="color: #0369a1; font-size: 14px; line-height: 1.6; display: block;">${labSubjectsText}</b>
+          <div style="grid-column: 1 / -1; background: #f0f9ff; padding: 16px 20px; border-radius: 14px; border: 1px solid #bae6fd; margin-top: 8px;">
+            <small style="color: #0284c7; font-weight: 700; text-transform: uppercase; font-size: 11px; display: block; margin-bottom: 8px; letter-spacing: 0.5px;">🧪 Enrolled Semester Labs (${sem})</small>
+            ${labSubjectsMarkup}
           </div>
         </div>
       </section>`;
