@@ -34,7 +34,7 @@ Start_Smart_Student_Portal/
 - **📊 Academic Management:**
   - **Student:** View profile details, attendance summary, subject marks, assignment status, and campus notices.
   - **Faculty:** Manage daily attendance, batch marks entry, assignment search, student queries, and profile settings.
-  - **Admin:** Manage student/faculty user accounts, add/edit/delete records, and view system status.
+  - **Admin:** Manage student/faculty user accounts, delete records, and view system status.
 - **🌐 Dynamic Origin Detection:** Modern web interface with dynamic API origin detection (`window.location.origin`).
 
 ---
