@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Smart Student Portal</title>
   <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body>
@@ -95,11 +96,9 @@
       <nav id="sidebarNav"></nav>
       <button id="logoutBtn" class="logout-btn">↪ Logout</button>
     </aside>
-    <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
 
     <section class="main-area">
       <header class="topbar">
-        <button id="mobileMenu" class="icon-btn">☰</button>
         <div><span id="pageEyebrow">Dashboard</span>
           <h2 id="pageTitle">Dashboard</h2>
         </div>
@@ -116,6 +115,127 @@
       </header>
       <div id="content" class="content"></div>
     </section>
+  </div>
+
+  <!-- AI Marks & Attendance Analysis Modal -->
+  <div id="aiAnalysisModal" class="ai-modal hidden" role="dialog" aria-labelledby="aiModalTitle" aria-modal="true">
+    <div class="ai-modal-overlay" id="aiModalOverlay"></div>
+    <div class="ai-modal-container">
+      <div class="ai-modal-header">
+        <div class="ai-modal-title-wrap">
+          <div class="ai-sparkle-icon" id="aiModalHeaderIcon">🤖</div>
+          <div>
+            <h3 id="aiModalTitle">AI Marks & Attendance Analytics</h3>
+            <p id="aiModalSubtitle">Personalized AI Performance Diagnostic & Visual Breakdown</p>
+          </div>
+        </div>
+        <button type="button" class="ai-modal-close" id="closeAiModalBtn" aria-label="Close AI Analytics Modal">&times;</button>
+      </div>
+
+      <div class="ai-modal-body">
+        <!-- Dynamic Metrics Cards Grid (Supports 5 or 6 cards) -->
+        <div class="ai-metrics-grid" id="aiMetricsGrid">
+          <div class="ai-metric-card" id="aiMetricCard1">
+            <span class="metric-icon" id="aiMetricIcon1">🏆</span>
+            <div class="metric-info">
+              <small id="aiMetricLabel1">Top Subject</small>
+              <h4 id="aiMetricVal1">--</h4>
+              <span class="metric-badge good" id="aiMetricBadge1">--</span>
+            </div>
+          </div>
+
+          <div class="ai-metric-card" id="aiMetricCard2">
+            <span class="metric-icon" id="aiMetricIcon2">🎯</span>
+            <div class="metric-info">
+              <small id="aiMetricLabel2">Low Subject</small>
+              <h4 id="aiMetricVal2">--</h4>
+              <span class="metric-badge warn" id="aiMetricBadge2">--</span>
+            </div>
+          </div>
+
+          <div class="ai-metric-card" id="aiMetricCard3">
+            <span class="metric-icon" id="aiMetricIcon3">🧪</span>
+            <div class="metric-info">
+              <small id="aiMetricLabel3">Top Lab</small>
+              <h4 id="aiMetricVal3">--</h4>
+              <span class="metric-badge good" id="aiMetricBadge3">--</span>
+            </div>
+          </div>
+
+          <div class="ai-metric-card" id="aiMetricCard4">
+            <span class="metric-icon" id="aiMetricIcon4">🔬</span>
+            <div class="metric-info">
+              <small id="aiMetricLabel4">Low Lab</small>
+              <h4 id="aiMetricVal4">--</h4>
+              <span class="metric-badge warn" id="aiMetricBadge4">--</span>
+            </div>
+          </div>
+
+          <div class="ai-metric-card" id="aiMetricCard5">
+            <span class="metric-icon" id="aiMetricIcon5">📈</span>
+            <div class="metric-info">
+              <small id="aiMetricLabel5">Grade Status</small>
+              <h4 id="aiMetricVal5">--</h4>
+              <span class="metric-badge good" id="aiMetricBadge5">--</span>
+            </div>
+          </div>
+
+          <div class="ai-metric-card" id="aiMetricCard6">
+            <span class="metric-icon" id="aiMetricIcon6">🚨</span>
+            <div class="metric-info">
+              <small id="aiMetricLabel6">Subjects < 75%</small>
+              <h4 id="aiMetricVal6">--</h4>
+              <span class="metric-badge danger" id="aiMetricBadge6">--</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts Grid (Bar Graph & Pie Chart) -->
+        <div class="ai-charts-grid">
+          <div class="ai-chart-panel">
+            <div class="chart-panel-head">
+              <h5 id="aiBarChartTitle">📊 Subject Marks Comparison (Bar Graph)</h5>
+              <span class="chip-sm" id="aiBarChartChip">Bar Graph</span>
+            </div>
+            <div class="chart-wrapper">
+              <canvas id="aiMarksBarChart"></canvas>
+            </div>
+          </div>
+
+          <div class="ai-chart-panel">
+            <div class="chart-panel-head">
+              <h5 id="aiPieChartTitle">🥧 Distribution Ratio (Pie Chart)</h5>
+              <span class="chip-sm" id="aiPieChartChip">Pie Chart</span>
+            </div>
+            <div class="chart-wrapper">
+              <canvas id="aiAttendancePieChart"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Insights & Recommendation Panel -->
+        <div class="ai-insights-panel">
+          <div class="insights-head">
+            <div class="head-left">
+              <span class="ai-pulse-dot"></span>
+              <h4>✨ AI Intelligence Diagnosis & Recommendations</h4>
+            </div>
+            <button type="button" id="refreshAiInsightsBtn" class="refresh-ai-btn">
+              <span>🔄 Refresh AI Insights</span>
+            </button>
+          </div>
+
+          <div id="aiInsightsContent" class="insights-content">
+            <!-- Dynamic AI output rendered here -->
+          </div>
+        </div>
+      </div>
+
+      <div class="ai-modal-footer">
+        <span class="ai-footer-note">Powered by Portal AI Core • Live Academic Analysis</span>
+        <button type="button" id="closeAiModalFooterBtn" class="secondary-btn">Close Report</button>
+      </div>
+    </div>
   </div>
 
   <script src="database.js"></script>

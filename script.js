@@ -123,10 +123,8 @@ function updateEditProfileSemesterOptions(courseYear, selectedSem) {
 
 function getSubjectsForStudent(student) {
   if (!student || student.role !== "student") return SUBJECTS;
-  if (!student.semester) return [];
-
-  const sem = student.semester;
-  const lang = student.languageChoice;
+  const sem = student.semester || "1st Semester";
+  const lang = student.languageChoice || "Kannada";
   const mathOpt = student.mathChoice || "Mathematics";
 
   let langId = "kannada";
@@ -306,7 +304,7 @@ function syncUsersToServer(data) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ users: data })
-  }).catch(() => {});
+  }).catch(() => { });
 }
 
 async function hydrateUsersFromServer() {
@@ -425,22 +423,53 @@ async function loginOnServer(role, username, password) {
 
 async function removeUserAccount(role, username) {
   const target = role === "student" ? "student" : "faculty";
-  const user = USERS[target].find(item => item.username.toLowerCase() === username.toLowerCase());
+  const normUser = String(username || "").trim().toLowerCase();
+  const user = USERS[target].find(item => item.username.toLowerCase() === normUser);
   if (!user) return false;
 
   await deleteUserOnServer(role, username);
-  USERS[target] = USERS[target].filter(item => item.username.toLowerCase() !== username.toLowerCase());
+
+  USERS[target] = USERS[target].filter(item => item.username.toLowerCase() !== normUser);
+
   if (target === "student") {
     if (ACADEMIC.students[username]) delete ACADEMIC.students[username];
-    Object.keys(ACADEMIC.students).forEach(key => {
-      if (key.toLowerCase() === username.toLowerCase()) delete ACADEMIC.students[key];
-    });
-    ACADEMIC.assignments = ACADEMIC.assignments.filter(entry => entry.student.toLowerCase() !== username.toLowerCase());
+    if (ACADEMIC.students) {
+      Object.keys(ACADEMIC.students).forEach(key => {
+        if (key.toLowerCase() === normUser) delete ACADEMIC.students[key];
+      });
+    }
+
+    if (Array.isArray(ACADEMIC.assignments)) {
+      ACADEMIC.assignments = ACADEMIC.assignments.filter(entry => (entry.student || "").toLowerCase() !== normUser);
+    }
+
+    if (Array.isArray(ACADEMIC.deletedAssignments)) {
+      ACADEMIC.deletedAssignments = ACADEMIC.deletedAssignments.filter(key => !String(key || "").toLowerCase().startsWith(`${normUser}___`));
+    }
+
+    if (Array.isArray(ACADEMIC.dailyAttendance)) {
+      ACADEMIC.dailyAttendance.forEach(log => {
+        if (log && log.records) {
+          Object.keys(log.records).forEach(key => {
+            if (key.toLowerCase() === normUser) {
+              delete log.records[key];
+            }
+          });
+        }
+      });
+    }
   }
+
   saveUsers();
   saveAcademicData();
+
+  if (currentUser && currentUser.role === target && (currentUser.username || "").toLowerCase() === normUser) {
+    logout();
+  }
+
   return true;
 }
+
 
 function validateUserInput({ username, password, email, role, subject, currentUsername }) {
   if (role !== "admin" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || "")) {
@@ -527,25 +556,29 @@ const DEFAULT_ACADEMIC = {
   subjectMarksConfig: {}
 };
 
+function normalizeAcademicData(parsed) {
+  if (!parsed || typeof parsed !== "object") return JSON.parse(JSON.stringify(DEFAULT_ACADEMIC));
+  return {
+    students: parsed.students && typeof parsed.students === "object" ? parsed.students : {},
+    notices: Array.isArray(parsed.notices) ? parsed.notices : [],
+    timetable: Array.isArray(parsed.timetable) ? parsed.timetable : [],
+    timetableHeader: parsed.timetableHeader && typeof parsed.timetableHeader === "object" ? parsed.timetableHeader : {},
+    customBreakRows: parsed.customBreakRows && typeof parsed.customBreakRows === "object" ? parsed.customBreakRows : {},
+    assignments: Array.isArray(parsed.assignments) ? parsed.assignments : [],
+    notes: Array.isArray(parsed.notes) ? parsed.notes : [],
+    deletedAssignments: Array.isArray(parsed.deletedAssignments) ? parsed.deletedAssignments : [],
+    dailyAttendance: Array.isArray(parsed.dailyAttendance) ? parsed.dailyAttendance : [],
+    subjectMarksConfig: parsed.subjectMarksConfig && typeof parsed.subjectMarksConfig === "object" ? parsed.subjectMarksConfig : {}
+  };
+}
+
 let ACADEMIC = loadAcademicData();
 
 function loadAcademicData() {
   const saved = localStorage.getItem("smartPortalAcademic");
   if (saved) {
     try {
-      const parsed = JSON.parse(saved);
-      return {
-        students: parsed.students && typeof parsed.students === "object" ? parsed.students : {},
-        notices: Array.isArray(parsed.notices) ? parsed.notices : [],
-        timetable: Array.isArray(parsed.timetable) ? parsed.timetable : [],
-        timetableHeader: parsed.timetableHeader && typeof parsed.timetableHeader === "object" ? parsed.timetableHeader : {},
-        customBreakRows: parsed.customBreakRows && typeof parsed.customBreakRows === "object" ? parsed.customBreakRows : {},
-        assignments: Array.isArray(parsed.assignments) ? parsed.assignments : [],
-        notes: Array.isArray(parsed.notes) ? parsed.notes : [],
-        deletedAssignments: Array.isArray(parsed.deletedAssignments) ? parsed.deletedAssignments : [],
-        dailyAttendance: Array.isArray(parsed.dailyAttendance) ? parsed.dailyAttendance : [],
-        subjectMarksConfig: parsed.subjectMarksConfig && typeof parsed.subjectMarksConfig === "object" ? parsed.subjectMarksConfig : {}
-      };
+      return normalizeAcademicData(JSON.parse(saved));
     } catch { }
   }
   return JSON.parse(JSON.stringify(DEFAULT_ACADEMIC));
@@ -570,7 +603,8 @@ let attendanceSaveSuccessMessage = "";
 let assignmentFilterDivision = "All Divisions";
 let assignmentSearchQuery = "";
 let editingTimetableIndex = -1;
-let activeTimetableDivision = "Div A";
+let activeTimetableDivision = "";
+let activeTimetableSemester = "";
 let isTimetableEditMode = false;
 
 function resetAttendanceFilters() {
@@ -799,6 +833,20 @@ $("togglePassword").addEventListener("click", () => {
   button.setAttribute("title", visible ? "Hide password" : "Show password");
 });
 
+document.addEventListener("click", e => {
+  const toggleBtn = e.target.closest("#toggleSignupPassword");
+  if (toggleBtn) {
+    const p = $("signupPassword");
+    if (!p) return;
+    const visible = p.type === "password";
+    p.type = visible ? "text" : "password";
+    toggleBtn.classList.toggle("is-visible", visible);
+    toggleBtn.innerHTML = visible ? eyeClosedSVG : eyeOpenSVG;
+    toggleBtn.setAttribute("aria-label", visible ? "Hide password" : "Show password");
+    toggleBtn.setAttribute("title", visible ? "Hide password" : "Show password");
+  }
+});
+
 
 function populateFacultySubjectOptions(query = "") {
   const select = $("signupSubject");
@@ -841,7 +889,16 @@ signupModal.innerHTML = `
       <label id="signupUsernameLabel">Username</label>
       <div class="input-wrap"><span class="input-icon">🪪</span><input id="signupUsername" required placeholder="Choose a username"></div>
       <label>Password</label>
-      <div class="input-wrap"><span class="input-icon">🔒</span><input id="signupPassword" type="password" required minlength="6" placeholder="Create a password"></div>
+      <div class="password-wrap">
+        <span class="input-icon">🔒</span>
+        <input id="signupPassword" type="password" required minlength="6" placeholder="Create a password" autocomplete="new-password">
+        <button type="button" id="toggleSignupPassword" class="eye-btn" aria-label="Show password" title="Show password">
+          <svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M2.2 12s3.5-6 9.8-6 9.8 6 9.8 6-3.5 6-9.8 6-9.8-6Z"></path>
+            <circle cx="12" cy="12" r="2.7"></circle>
+          </svg>
+        </button>
+      </div>
       <label>Email Address</label>
       <div class="input-wrap"><span class="input-icon">✉️</span><input id="signupEmail" type="email" required placeholder="Enter your email address" autocomplete="email"></div>
       
@@ -851,6 +908,7 @@ signupModal.innerHTML = `
         <label>Course Year</label>
         <div class="input-wrap">
           <select id="signupCourseYear" required>
+            <option value="">-- Select Course Year --</option>
             <option value="1st Year">1st Year</option>
             <option value="2nd Year">2nd Year</option>
             <option value="3rd Year">3rd Year</option>
@@ -859,6 +917,7 @@ signupModal.innerHTML = `
         <label>Semester</label>
         <div class="input-wrap">
           <select id="signupSemester" required>
+            <option value="">-- Select Semester --</option>
             <option value="1st Semester">1st Semester</option>
             <option value="2nd Semester">2nd Semester</option>
           </select>
@@ -866,6 +925,7 @@ signupModal.innerHTML = `
         <label>Division</label>
         <div class="input-wrap">
           <select id="signupDivision" required>
+            <option value="">-- Select Division --</option>
             <option value="Div A">Div A</option>
             <option value="Div B">Div B</option>
           </select>
@@ -873,6 +933,7 @@ signupModal.innerHTML = `
         <label>Language Subject Choice</label>
         <div class="input-wrap">
           <select id="signupLanguage" required>
+            <option value="">-- Select Language Subject --</option>
             <option value="Kannada">Kannada</option>
             <option value="Hindi">Hindi</option>
           </select>
@@ -881,6 +942,7 @@ signupModal.innerHTML = `
           <label>Mathematics / Accountancy Choice (1st Semester)</label>
           <div class="input-wrap">
             <select id="signupMathChoice">
+              <option value="">-- Select Subject Choice --</option>
               <option value="Mathematics">Mathematics</option>
               <option value="Accountancy">Accountancy</option>
             </select>
@@ -913,6 +975,12 @@ document.body.appendChild(signupModal);
 function updateSignupSemesterOptions(courseYear, selectedSem) {
   const semSelect = $("signupSemester");
   if (!semSelect) return;
+  if (!courseYear) {
+    semSelect.innerHTML = `<option value="">-- Select Semester --</option>`;
+    semSelect.value = "";
+    if ($("signupMathWrap")) $("signupMathWrap").style.display = "none";
+    return;
+  }
   const validSemesters = getSemestersForCourseYear(courseYear);
   semSelect.innerHTML = validSemesters.map(sem => `<option value="${sem}">${sem}</option>`).join("");
   if (selectedSem && validSemesters.includes(selectedSem)) {
@@ -1089,17 +1157,25 @@ function openSignup(role, user = null) {
   $("signupName").value = user ? user.name : "";
   $("signupUsername").value = user ? user.username : "";
   $("signupPassword").value = "";
+  $("signupPassword").type = "password";
   $("signupPassword").placeholder = user ? "Leave blank to keep current password" : "Create a password";
+  const signupToggleBtn = $("toggleSignupPassword");
+  if (signupToggleBtn) {
+    signupToggleBtn.classList.remove("is-visible");
+    signupToggleBtn.innerHTML = eyeOpenSVG;
+    signupToggleBtn.setAttribute("aria-label", "Show password");
+    signupToggleBtn.setAttribute("title", "Show password");
+  }
   $("signupEmail").value = user ? (user.email || "") : "";
 
   if (isStudent) {
-    const courseYear = user ? (user.courseYear || "1st Year") : "1st Year";
-    const sem = user ? (user.semester || "1st Semester") : "1st Semester";
+    const courseYear = user ? (user.courseYear || "") : "";
+    const sem = user ? (user.semester || "") : "";
     if ($("signupCourseYear")) $("signupCourseYear").value = courseYear;
     updateSignupSemesterOptions(courseYear, sem);
-    if ($("signupDivision")) $("signupDivision").value = user ? (user.division || "Div A") : "Div A";
-    if ($("signupLanguage")) $("signupLanguage").value = user ? (user.languageChoice || "Kannada") : "Kannada";
-    if ($("signupMathChoice")) $("signupMathChoice").value = user ? (user.mathChoice || "Mathematics") : "Mathematics";
+    if ($("signupDivision")) $("signupDivision").value = user ? (user.division || "") : "";
+    if ($("signupLanguage")) $("signupLanguage").value = user ? (user.languageChoice || "") : "";
+    if ($("signupMathChoice")) $("signupMathChoice").value = user ? (user.mathChoice || "") : "";
     if ($("signupCourse")) $("signupCourse").value = user ? (user.course || "Bachelor of Computer Applications (BCA)") : "Bachelor of Computer Applications (BCA)";
   } else {
     if ($("signupDepartment")) $("signupDepartment").value = user ? (user.department || "Department of Computer Science & Applications") : "Department of Computer Science & Applications";
@@ -1139,13 +1215,21 @@ $("signupForm").addEventListener("submit", async e => {
   const department = role === "faculty" ? ($("signupDepartment") ? $("signupDepartment").value.trim() : "Department of Computer Science & Applications") : null;
 
   const course = role === "student" ? ($("signupCourse") ? $("signupCourse").value.trim() : "Bachelor of Computer Applications (BCA)") : null;
-  const courseYear = role === "student" ? ($("signupCourseYear") ? $("signupCourseYear").value : "1st Year") : null;
-  const semester = role === "student" ? ($("signupSemester") ? $("signupSemester").value : "1st Semester") : null;
-  const division = role === "student" ? ($("signupDivision") ? $("signupDivision").value : "Div A") : null;
-  const languageChoice = role === "student" ? ($("signupLanguage") ? $("signupLanguage").value : "Kannada") : null;
-  const mathChoice = role === "student" ? ($("signupMathChoice") ? $("signupMathChoice").value : "Mathematics") : null;
+  const courseYear = role === "student" ? ($("signupCourseYear") ? $("signupCourseYear").value : "") : null;
+  const semester = role === "student" ? ($("signupSemester") ? $("signupSemester").value : "") : null;
+  const division = role === "student" ? ($("signupDivision") ? $("signupDivision").value : "") : null;
+  const languageChoice = role === "student" ? ($("signupLanguage") ? $("signupLanguage").value : "") : null;
+  const mathChoice = role === "student" ? ($("signupMathChoice") ? $("signupMathChoice").value : "") : null;
 
   const currentUsername = $("signupCurrentUsername").value || null;
+
+  if (role === "student" && (!currentUsername || !user)) {
+    if (!courseYear || !semester || !division || !languageChoice) {
+      $("signupMessage").textContent = "Please select all required academic details (Course Year, Semester, Division, Language Choice).";
+      $("signupMessage").className = "message error";
+      return;
+    }
+  }
 
   if (!currentUsername && !password) {
     $("signupMessage").textContent = "Password is required.";
@@ -1240,6 +1324,965 @@ $("loginForm").addEventListener("submit", async e => {
 
 if ($("logoutBtn")) $("logoutBtn").addEventListener("click", logout);
 
+// ====================================================
+// AI MARKS & ATTENDANCE ANALYTICS ENGINE & MODAL LOGIC
+// ====================================================
+
+let aiBarChartInstance = null;
+let aiPieChartInstance = null;
+let currentAiAnalysisUsername = null;
+let currentAiAnalysisMode = "marks";
+
+function calculateStudentAnalytics(username) {
+  const normUser = String(username || "").trim();
+  const studentObj = (USERS.student || []).find(s => s.username.toLowerCase() === normUser.toLowerCase()) || currentUser;
+  const targetUser = studentObj ? studentObj.username : normUser;
+  const record = getStudentRecord(targetUser);
+
+  let enrolledSubjects = getSubjectsForStudent(studentObj);
+  if (!enrolledSubjects || !enrolledSubjects.length) {
+    const targetSem = (studentObj && studentObj.semester) ? studentObj.semester : "1st Semester";
+    enrolledSubjects = SUBJECTS.filter(s => s.semester === targetSem);
+    if (!enrolledSubjects.length) enrolledSubjects = SUBJECTS.slice(0, 8);
+  }
+
+  let totalMarksPct = 0;
+  let totalObtainedMarks = 0;
+  let totalMaxMarks = 0;
+  let totalI1Obtained = 0;
+  let totalI1Max = 0;
+  let totalI1Pct = 0;
+  let validI1Count = 0;
+  let validMarksCount = 0;
+  let totalAttPct = 0;
+  let validAttCount = 0;
+
+  let hasAnyI1 = false;
+  let hasAnyI2 = false;
+
+  const subjectData = enrolledSubjects.map(s => {
+    const isLab = s.name.toLowerCase().includes("lab") || s.id.toLowerCase().includes("lab");
+
+    // Calculate marks
+    const m = record.marks ? record.marks[s.id] : null;
+    let markPct = 0;
+    let markObtained = 0;
+    let markMax = 100;
+    let isMarkSet = false;
+
+    let i1Val = null;
+    let i1Max = 20;
+    let i1Pct = null;
+
+    let i2Val = null;
+    let i2Max = 20;
+    let i2Pct = null;
+
+    let assignVal = null;
+
+    if (m && typeof m === "object") {
+      if (typeof m.internal1 === "number") {
+        i1Val = m.internal1;
+        i1Max = m.maxInternal1 || 20;
+        i1Pct = i1Max > 0 ? Math.min(100, Math.max(0, Math.round((i1Val / i1Max) * 100))) : 0;
+        totalI1Obtained += i1Val;
+        totalI1Max += i1Max;
+        totalI1Pct += i1Pct;
+        validI1Count++;
+        hasAnyI1 = true;
+      }
+      if (typeof m.internal2 === "number") {
+        i2Val = m.internal2;
+        i2Max = m.maxInternal2 || 20;
+        i2Pct = i2Max > 0 ? Math.min(100, Math.max(0, Math.round((i2Val / i2Max) * 100))) : 0;
+        hasAnyI2 = true;
+      }
+      if (typeof m.assignment === "number") {
+        assignVal = m.assignment;
+      }
+
+      markObtained = (i1Val || 0) + (i2Val || 0) + (assignVal || 0);
+      markMax = (i1Val !== null ? i1Max : 0) + (i2Val !== null ? i2Max : 0) + (assignVal !== null ? 10 : 0);
+      if (markMax === 0) markMax = i1Max + i2Max + 10;
+      if (i1Val !== null || i2Val !== null || assignVal !== null) {
+        isMarkSet = true;
+      }
+    } else if (typeof m === "number") {
+      markObtained = m;
+      markMax = 100;
+      isMarkSet = true;
+    }
+
+    if (isMarkSet && markMax > 0) {
+      markPct = Math.min(100, Math.max(0, Math.round((markObtained / markMax) * 100)));
+      totalMarksPct += markPct;
+      totalObtainedMarks += markObtained;
+      totalMaxMarks += markMax;
+      validMarksCount++;
+    }
+
+    // Calculate attendance
+    const attVal = (record.attendance && typeof record.attendance[s.id] === "number") ? record.attendance[s.id] : 0;
+    totalAttPct += attVal;
+    validAttCount++;
+
+    return {
+      id: s.id,
+      name: s.name,
+      short: s.short || s.name,
+      icon: s.icon || (isLab ? "🧪" : "📖"),
+      isLab: isLab,
+      markObtained: markObtained,
+      markMax: markMax,
+      markPct: markPct,
+      isMarkSet: isMarkSet,
+      i1Val: i1Val,
+      i1Max: i1Max,
+      i1Pct: i1Pct,
+      i2Val: i2Val,
+      i2Max: i2Max,
+      i2Pct: i2Pct,
+      assignVal: assignVal,
+      attPct: attVal
+    };
+  });
+
+  let internalsMode = "none";
+  if (hasAnyI2) internalsMode = "both";
+  else if (hasAnyI1) internalsMode = "i1_only";
+
+  const avgMarksPct = validMarksCount > 0 ? Math.round(totalMarksPct / validMarksCount) : 0;
+  const avgI1Pct = validI1Count > 0 ? Math.round(totalI1Pct / validI1Count) : 0;
+  const avgAttPct = validAttCount > 0 ? Math.round(totalAttPct / validAttCount) : 0;
+
+  // Separate Theory vs Labs
+  const theorySubjects = subjectData.filter(s => !s.isLab);
+  const labSubjects = subjectData.filter(s => s.isLab);
+
+  // Theory Marks Top/Low
+  const sortedTheoryByMarks = [...theorySubjects].sort((a, b) => {
+    if (internalsMode === "i1_only") return (b.i1Pct || 0) - (a.i1Pct || 0);
+    return b.markPct - a.markPct;
+  });
+  const topTheoryMarks = sortedTheoryByMarks.length ? sortedTheoryByMarks[0] : null;
+  const lowTheoryMarks = sortedTheoryByMarks.length ? sortedTheoryByMarks[sortedTheoryByMarks.length - 1] : null;
+
+  // Lab Marks Top/Low
+  const sortedLabByMarks = [...labSubjects].sort((a, b) => {
+    if (internalsMode === "i1_only") return (b.i1Pct || 0) - (a.i1Pct || 0);
+    return b.markPct - a.markPct;
+  });
+  const topLabMarks = sortedLabByMarks.length ? sortedLabByMarks[0] : null;
+  const lowLabMarks = sortedLabByMarks.length ? sortedLabByMarks[sortedLabByMarks.length - 1] : null;
+
+  // Theory Attendance Top/Low
+  const sortedTheoryByAtt = [...theorySubjects].sort((a, b) => b.attPct - a.attPct);
+  const topTheoryAtt = sortedTheoryByAtt.length ? sortedTheoryByAtt[0] : null;
+  const lowTheoryAtt = sortedTheoryByAtt.length ? sortedTheoryByAtt[sortedTheoryByAtt.length - 1] : null;
+
+  // Lab Attendance Top/Low
+  const sortedLabByAtt = [...labSubjects].sort((a, b) => b.attPct - a.attPct);
+  const topLabAtt = sortedLabByAtt.length ? sortedLabByAtt[0] : null;
+  const lowLabAtt = sortedLabByAtt.length ? sortedLabByAtt[sortedLabByAtt.length - 1] : null;
+
+  const lowAttendanceSubjects = subjectData.filter(s => s.attPct < 75);
+  const highAttendanceSubjects = subjectData.filter(s => s.attPct >= 85);
+
+  return {
+    student: studentObj,
+    subjectData: subjectData,
+    theorySubjects: theorySubjects,
+    labSubjects: labSubjects,
+    internalsMode: internalsMode,
+    avgMarksPct: avgMarksPct,
+    avgI1Pct: avgI1Pct,
+    avgAttPct: avgAttPct,
+    totalObtainedMarks: totalObtainedMarks,
+    totalMaxMarks: totalMaxMarks,
+    totalI1Obtained: totalI1Obtained,
+    totalI1Max: totalI1Max,
+    topTheoryMarks: topTheoryMarks,
+    lowTheoryMarks: lowTheoryMarks,
+    topLabMarks: topLabMarks,
+    lowLabMarks: lowLabMarks,
+    topTheoryAtt: topTheoryAtt,
+    lowTheoryAtt: lowTheoryAtt,
+    topLabAtt: topLabAtt,
+    lowLabAtt: lowLabAtt,
+    lowAttendanceSubjects: lowAttendanceSubjects,
+    highAttendanceSubjects: highAttendanceSubjects
+  };
+}
+
+function getGradeStatus(marksPct) {
+  if (typeof marksPct !== "number" || isNaN(marksPct)) return "Pending";
+  if (marksPct >= 85) return "Distinction";
+  if (marksPct >= 70) return "First Class";
+  if (marksPct >= 50) return "Second Class";
+  if (marksPct >= 35) return "Third Class";
+  if (marksPct > 0) return "Needs Improvement";
+  return "Evaluation Pending";
+}
+
+function generateAiInsights(analytics, mode = "marks") {
+  const { student, avgMarksPct, avgAttPct, topTheoryMarks, lowTheoryMarks, topLabMarks, lowLabMarks, topTheoryAtt, lowTheoryAtt, topLabAtt, lowLabAtt, lowAttendanceSubjects } = analytics;
+  const studentName = student ? student.name : "Student";
+
+  if (mode === "marks") {
+    const isI1Only = analytics.internalsMode === "i1_only";
+    const isBoth = analytics.internalsMode === "both";
+    const evalTarget = isI1Only ? "(1st Internal Test Evaluation)" : (isBoth ? "(1st & 2nd Internals Evaluation)" : "");
+    const totalScoreText = isI1Only
+      ? `${analytics.totalI1Obtained} / ${analytics.totalI1Max} Marks (${analytics.avgI1Pct}% Aggregate)`
+      : `${analytics.totalObtainedMarks} / ${analytics.totalMaxMarks} Marks (${analytics.avgMarksPct}% Aggregate)`;
+
+    let html = `
+      <div style="background: rgba(255,255,255,0.75); border:1px solid #c7d2fe; padding:14px 18px; border-radius:14px; margin-bottom:14px; box-shadow:0 2px 6px rgba(0,0,0,0.02);">
+        <p style="margin:0; font-size:14px; font-weight:600; color:#1e1b4b; line-height:1.5;">
+          🤖 <strong>AI Marks Diagnosis for ${studentName} ${evalTarget}:</strong>
+          Based on internal test & assignment evaluation across theory & practical lab courses, ${studentName} has scored total real marks of <strong>${totalScoreText}</strong>.
+        </p>
+      </div>
+
+      <div class="insights-section-title">📌 Marks Performance Breakdown & Strategy</div>
+      <ul class="ai-recommendation-list">
+    `;
+
+    if (topTheoryMarks) {
+      const topScoreStr = isI1Only ? `${topTheoryMarks.i1Val} / ${topTheoryMarks.i1Max} Marks` : `${topTheoryMarks.markObtained} / ${topTheoryMarks.markMax} Marks`;
+      html += `
+        <li class="ai-recommendation-item good-item">
+          <span style="font-size:18px;">🏆</span>
+          <div>
+            <strong>Top Performing Subject (Theory):</strong> <b>${topTheoryMarks.name} (${topTheoryMarks.short})</b> is your highest-scoring theory course at <strong>${topScoreStr}</strong>. Great academic mastery!
+          </div>
+        </li>
+      `;
+    }
+
+    if (lowTheoryMarks) {
+      const lowScoreStr = isI1Only ? `${lowTheoryMarks.i1Val} / ${lowTheoryMarks.i1Max} Marks` : `${lowTheoryMarks.markObtained} / ${lowTheoryMarks.markMax} Marks`;
+      html += `
+        <li class="ai-recommendation-item ${(isI1Only ? lowTheoryMarks.i1Pct : lowTheoryMarks.markPct) < 50 ? 'alert-item' : ''}">
+          <span style="font-size:18px;">🎯</span>
+          <div>
+            <strong>Low Performing Subject (Theory):</strong> <b>${lowTheoryMarks.name} (${lowTheoryMarks.short})</b> currently stands at <strong>${lowScoreStr}</strong>. Focus on previous internal test blueprints to boost your score.
+          </div>
+        </li>
+      `;
+    }
+
+    if (topLabMarks) {
+      const topLabStr = isI1Only ? `${topLabMarks.i1Val} / ${topLabMarks.i1Max} Marks` : `${topLabMarks.markObtained} / ${topLabMarks.markMax} Marks`;
+      html += `
+        <li class="ai-recommendation-item good-item">
+          <span style="font-size:18px;">🧪</span>
+          <div>
+            <strong>Top Performing Practical Lab:</strong> <b>${topLabMarks.name} (${topLabMarks.short})</b> leads practical performance at <strong>${topLabStr}</strong>.
+          </div>
+        </li>
+      `;
+    }
+
+    if (lowLabMarks) {
+      const lowLabStr = isI1Only ? `${lowLabMarks.i1Val} / ${lowLabMarks.i1Max} Marks` : `${lowLabMarks.markObtained} / ${lowLabMarks.markMax} Marks`;
+      html += `
+        <li class="ai-recommendation-item">
+          <span style="font-size:18px;">🔬</span>
+          <div>
+            <strong>Low Performing Practical Lab:</strong> <b>${lowLabMarks.name} (${lowLabMarks.short})</b> stands at <strong>${lowLabStr}</strong>. Complete all pending lab manual submissions.
+          </div>
+        </li>
+      `;
+    }
+
+    html += `
+      </ul>
+      <div style="margin-top:14px; font-size:12px; color:#475569; font-weight:600; display:flex; align-items:center; gap:6px;">
+        <span>💡 Pro Tip:</span> Scoring above 75% in internal assessments significantly improves overall final semester GPA.
+      </div>
+    `;
+    return html;
+
+  } else {
+    // Attendance mode
+    let attStatusText = "Satisfactory";
+    if (avgAttPct >= 85) attStatusText = "Excellent Attendance";
+    else if (avgAttPct >= 75) attStatusText = "Good Standing";
+    else attStatusText = "At-Risk (< 75%)";
+
+    let html = `
+      <div style="background: rgba(255,255,255,0.75); border:1px solid #c7d2fe; padding:14px 18px; border-radius:14px; margin-bottom:14px; box-shadow:0 2px 6px rgba(0,0,0,0.02);">
+        <p style="margin:0; font-size:14px; font-weight:600; color:#1e1b4b; line-height:1.5;">
+          🤖 <strong>AI Attendance Diagnosis for ${studentName}:</strong>
+          Your overall attendance rate is <strong>${avgAttPct}% (${attStatusText})</strong> across all theory lectures and practical lab sessions.
+        </p>
+      </div>
+
+      <div class="insights-section-title">📌 Attendance Tracking & Mandatory Cutoff</div>
+      <ul class="ai-recommendation-list">
+    `;
+
+    if (topTheoryAtt) {
+      html += `
+        <li class="ai-recommendation-item good-item">
+          <span style="font-size:18px;">🌟</span>
+          <div>
+            <strong>Top Attendance Subject (Theory):</strong> <b>${topTheoryAtt.name} (${topTheoryAtt.short})</b> has your highest theory attendance at <strong>${topTheoryAtt.attPct}%</strong>.
+          </div>
+        </li>
+      `;
+    }
+
+    if (lowTheoryAtt) {
+      const isRisk = lowTheoryAtt.attPct < 75;
+      html += `
+        <li class="ai-recommendation-item ${isRisk ? 'alert-item' : ''}">
+          <span style="font-size:18px;">⚠️</span>
+          <div>
+            <strong>Low Attendance Subject (Theory):</strong> <b>${lowTheoryAtt.name} (${lowTheoryAtt.short})</b> is at <strong>${lowTheoryAtt.attPct}%</strong>${isRisk ? ' — <strong style="color:#ef4444;">Below mandatory 75% cutoff!</strong>' : ''}.
+          </div>
+        </li>
+      `;
+    }
+
+    if (topLabAtt) {
+      html += `
+        <li class="ai-recommendation-item good-item">
+          <span style="font-size:18px;">🧪</span>
+          <div>
+            <strong>Top Attendance Lab:</strong> <b>${topLabAtt.name} (${topLabAtt.short})</b> leads lab attendance at <strong>${topLabAtt.attPct}%</strong>.
+          </div>
+        </li>
+      `;
+    }
+
+    if (lowLabAtt) {
+      const isRisk = lowLabAtt.attPct < 75;
+      html += `
+        <li class="ai-recommendation-item ${isRisk ? 'alert-item' : ''}">
+          <span style="font-size:18px;">🔬</span>
+          <div>
+            <strong>Low Attendance Lab:</strong> <b>${lowLabAtt.name} (${lowLabAtt.short})</b> stands at <strong>${lowLabAtt.attPct}%</strong>${isRisk ? ' — <strong style="color:#ef4444;">Below mandatory 75% cutoff!</strong>' : ''}.
+          </div>
+        </li>
+      `;
+    }
+
+    if (lowAttendanceSubjects.length > 0) {
+      const names = lowAttendanceSubjects.map(s => `${s.name} (${s.attPct}%)`).join(", ");
+      html += `
+        <li class="ai-recommendation-item alert-item">
+          <span style="font-size:18px;">🚨</span>
+          <div>
+            <strong>Action Required (${lowAttendanceSubjects.length} Subject/Lab${lowAttendanceSubjects.length > 1 ? 's' : ''} < 75%):</strong>
+            <strong>${names}</strong> require immediate lecture/practical attendance to avoid hall ticket locks.
+          </div>
+        </li>
+      `;
+    }
+
+    html += `
+      </ul>
+      <div style="margin-top:14px; font-size:12px; color:#475569; font-weight:600; display:flex; align-items:center; gap:6px;">
+        <span>💡 Pro Tip:</span> Mandatory attendance of 75% is required by the university to sit for semester end examinations.
+      </div>
+    `;
+    return html;
+  }
+}
+
+function renderAiCharts(analytics, mode = "marks") {
+  const { subjectData } = analytics;
+  const labels = subjectData.map(s => s.short || s.name);
+  const marksValues = subjectData.map(s => s.markPct);
+  const attValues = subjectData.map(s => s.attPct);
+
+  const canvasMarks = document.getElementById("aiMarksBarChart");
+  const canvasAtt = document.getElementById("aiAttendancePieChart");
+
+  if (!canvasMarks || !canvasAtt) return;
+
+  if (aiBarChartInstance) {
+    aiBarChartInstance.destroy();
+    aiBarChartInstance = null;
+  }
+  if (aiPieChartInstance) {
+    aiPieChartInstance.destroy();
+    aiPieChartInstance = null;
+  }
+
+  if (mode === "marks") {
+    const isI1Only = analytics.internalsMode === "i1_only";
+    const isBoth = analytics.internalsMode === "both";
+
+    if (isI1Only) {
+      const i1Values = subjectData.map(s => s.i1Val !== null ? s.i1Val : 0);
+      const i1Maxes = subjectData.map(s => s.i1Max || 20);
+      const maxScale = Math.max(20, ...i1Maxes);
+
+      const barColors = subjectData.map(s => (s.i1Pct || 0) >= 75 ? 'rgba(34, 197, 94, 0.85)' : ((s.i1Pct || 0) >= 50 ? 'rgba(59, 130, 246, 0.85)' : ((s.i1Pct || 0) >= 35 ? 'rgba(245, 158, 11, 0.85)' : 'rgba(239, 68, 68, 0.85)')));
+      const barBorderColors = subjectData.map(s => (s.i1Pct || 0) >= 75 ? '#16a34a' : ((s.i1Pct || 0) >= 50 ? '#2563eb' : ((s.i1Pct || 0) >= 35 ? '#d97706' : '#dc2626')));
+
+      const distinctionCount = subjectData.filter(s => (s.i1Pct || 0) >= 85).length;
+      const firstClassCount = subjectData.filter(s => (s.i1Pct || 0) >= 70 && (s.i1Pct || 0) < 85).length;
+      const secondClassCount = subjectData.filter(s => (s.i1Pct || 0) >= 50 && (s.i1Pct || 0) < 70).length;
+      const thirdClassCount = subjectData.filter(s => (s.i1Pct || 0) >= 35 && (s.i1Pct || 0) < 50).length;
+      const failCount = subjectData.filter(s => (s.i1Pct || 0) < 35).length;
+
+      if (typeof Chart !== "undefined") {
+        const ctxBar = canvasMarks.getContext("2d");
+        aiBarChartInstance = new Chart(ctxBar, {
+          type: "bar",
+          data: {
+            labels: labels,
+            datasets: [{
+              label: "1st Internal Marks",
+              data: i1Values,
+              backgroundColor: barColors,
+              borderColor: barBorderColors,
+              borderWidth: 1.5,
+              borderRadius: 8
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => {
+                    const s = subjectData[ctx.dataIndex];
+                    return `${s.short || s.name}: ${s.i1Val || 0} / ${s.i1Max || 20} Marks (${s.i1Pct || 0}%)`;
+                  }
+                }
+              }
+            },
+            scales: {
+              y: { beginAtZero: true, max: maxScale, ticks: { callback: (val) => val + " Marks" }, grid: { color: "#f1f5f9" } },
+              x: { grid: { display: false } }
+            }
+          }
+        });
+
+        const ctxPie = canvasAtt.getContext("2d");
+        aiPieChartInstance = new Chart(ctxPie, {
+          type: "doughnut",
+          data: {
+            labels: ["Distinction (≥85%)", "First Class (70-84%)", "Second Class (50-69%)", "Third Class (35-49%)", "Fail (<35%)"],
+            datasets: [{
+              data: [distinctionCount, firstClassCount, secondClassCount, thirdClassCount, failCount],
+              backgroundColor: [
+                "rgba(34, 197, 94, 0.85)",
+                "rgba(59, 130, 246, 0.85)",
+                "rgba(168, 85, 247, 0.85)",
+                "rgba(245, 158, 11, 0.85)",
+                "rgba(239, 68, 68, 0.85)"
+              ],
+              borderColor: ["#16a34a", "#2563eb", "#7e22ce", "#d97706", "#dc2626"],
+              borderWidth: 1.5
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: "bottom", labels: { font: { size: 11, weight: '600' } } } }
+          }
+        });
+      } else {
+        renderCanvasFallbackBar(canvasMarks, labels, i1Values);
+        renderCanvasFallbackPie(canvasAtt, [distinctionCount, firstClassCount, secondClassCount, thirdClassCount, failCount]);
+      }
+    } else if (isBoth) {
+      const i1Values = subjectData.map(s => s.i1Val !== null ? s.i1Val : 0);
+      const i2Values = subjectData.map(s => s.i2Val !== null ? s.i2Val : 0);
+      const maxScale = Math.max(20, ...subjectData.map(s => Math.max(s.i1Max || 20, s.i2Max || 20)));
+
+      const distinctionCount = subjectData.filter(s => s.markPct >= 85).length;
+      const firstClassCount = subjectData.filter(s => s.markPct >= 70 && s.markPct < 85).length;
+      const secondClassCount = subjectData.filter(s => s.markPct >= 50 && s.markPct < 70).length;
+      const thirdClassCount = subjectData.filter(s => s.markPct >= 35 && s.markPct < 50).length;
+      const failCount = subjectData.filter(s => s.markPct < 35).length;
+
+      if (typeof Chart !== "undefined") {
+        const ctxBar = canvasMarks.getContext("2d");
+        aiBarChartInstance = new Chart(ctxBar, {
+          type: "bar",
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: "1st Internal Marks",
+                data: i1Values,
+                backgroundColor: "rgba(59, 130, 246, 0.85)",
+                borderColor: "#2563eb",
+                borderWidth: 1.5,
+                borderRadius: 6
+              },
+              {
+                label: "2nd Internal Marks",
+                data: i2Values,
+                backgroundColor: "rgba(168, 85, 247, 0.85)",
+                borderColor: "#7e22ce",
+                borderWidth: 1.5,
+                borderRadius: 6
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: true, position: "top", labels: { font: { size: 11, weight: '700' } } },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => {
+                    const s = subjectData[ctx.dataIndex];
+                    const label = ctx.dataset.label || "";
+                    const val = ctx.raw;
+                    const max = label.includes("1st") ? (s.i1Max || 20) : (s.i2Max || 20);
+                    return `${s.short || s.name} (${label}): ${val} / ${max} Marks`;
+                  }
+                }
+              }
+            },
+            scales: {
+              y: { beginAtZero: true, max: maxScale, ticks: { callback: (val) => val + " Marks" }, grid: { color: "#f1f5f9" } },
+              x: { grid: { display: false } }
+            }
+          }
+        });
+
+        const ctxPie = canvasAtt.getContext("2d");
+        aiPieChartInstance = new Chart(ctxPie, {
+          type: "doughnut",
+          data: {
+            labels: ["Distinction (≥85%)", "First Class (70-84%)", "Second Class (50-69%)", "Third Class (35-49%)", "Fail (<35%)"],
+            datasets: [{
+              data: [distinctionCount, firstClassCount, secondClassCount, thirdClassCount, failCount],
+              backgroundColor: [
+                "rgba(34, 197, 94, 0.85)",
+                "rgba(59, 130, 246, 0.85)",
+                "rgba(168, 85, 247, 0.85)",
+                "rgba(245, 158, 11, 0.85)",
+                "rgba(239, 68, 68, 0.85)"
+              ],
+              borderColor: ["#16a34a", "#2563eb", "#7e22ce", "#d97706", "#dc2626"],
+              borderWidth: 1.5
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: "bottom", labels: { font: { size: 11, weight: '600' } } } }
+          }
+        });
+      } else {
+        renderCanvasFallbackBar(canvasMarks, labels, i1Values);
+        renderCanvasFallbackPie(canvasAtt, [distinctionCount, firstClassCount, secondClassCount, thirdClassCount, failCount]);
+      }
+    } else {
+      const realMarksValues = subjectData.map(s => s.markObtained);
+      const maxMarksValues = subjectData.map(s => s.markMax);
+      const maxScale = Math.max(50, ...maxMarksValues);
+
+      const barColors = subjectData.map(s => s.markPct >= 75 ? 'rgba(34, 197, 94, 0.85)' : (s.markPct >= 50 ? 'rgba(59, 130, 246, 0.85)' : (s.markPct >= 35 ? 'rgba(245, 158, 11, 0.85)' : 'rgba(239, 68, 68, 0.85)')));
+      const barBorderColors = subjectData.map(s => s.markPct >= 75 ? '#16a34a' : (s.markPct >= 50 ? '#2563eb' : (s.markPct >= 35 ? '#d97706' : '#dc2626')));
+
+      const distinctionCount = subjectData.filter(s => s.markPct >= 85).length;
+      const firstClassCount = subjectData.filter(s => s.markPct >= 70 && s.markPct < 85).length;
+      const secondClassCount = subjectData.filter(s => s.markPct >= 50 && s.markPct < 70).length;
+      const thirdClassCount = subjectData.filter(s => s.markPct >= 35 && s.markPct < 50).length;
+      const failCount = subjectData.filter(s => s.markPct < 35).length;
+
+      if (typeof Chart !== "undefined") {
+        const ctxBar = canvasMarks.getContext("2d");
+        aiBarChartInstance = new Chart(ctxBar, {
+          type: "bar",
+          data: {
+            labels: labels,
+            datasets: [{
+              label: "Subject & Lab Real Marks",
+              data: realMarksValues,
+              backgroundColor: barColors,
+              borderColor: barBorderColors,
+              borderWidth: 1.5,
+              borderRadius: 8
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => {
+                    const s = subjectData[ctx.dataIndex];
+                    return `${s.short || s.name}: ${s.markObtained} / ${s.markMax} Marks (${s.markPct}%)`;
+                  }
+                }
+              }
+            },
+            scales: {
+              y: { beginAtZero: true, max: maxScale, ticks: { callback: (val) => val + " Marks" }, grid: { color: "#f1f5f9" } },
+              x: { grid: { display: false } }
+            }
+          }
+        });
+
+        const ctxPie = canvasAtt.getContext("2d");
+        aiPieChartInstance = new Chart(ctxPie, {
+          type: "doughnut",
+          data: {
+            labels: ["Distinction (≥85%)", "First Class (70-84%)", "Second Class (50-69%)", "Third Class (35-49%)", "Fail (<35%)"],
+            datasets: [{
+              data: [distinctionCount, firstClassCount, secondClassCount, thirdClassCount, failCount],
+              backgroundColor: [
+                "rgba(34, 197, 94, 0.85)",
+                "rgba(59, 130, 246, 0.85)",
+                "rgba(168, 85, 247, 0.85)",
+                "rgba(245, 158, 11, 0.85)",
+                "rgba(239, 68, 68, 0.85)"
+              ],
+              borderColor: ["#16a34a", "#2563eb", "#7e22ce", "#d97706", "#dc2626"],
+              borderWidth: 1.5
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: "bottom", labels: { font: { size: 11, weight: '600' } } } }
+          }
+        });
+      } else {
+        renderCanvasFallbackBar(canvasMarks, labels, realMarksValues);
+        renderCanvasFallbackPie(canvasAtt, [distinctionCount, firstClassCount, secondClassCount, thirdClassCount, failCount]);
+      }
+    }
+  } else {
+    // Attendance mode
+    const barColors = attValues.map(v => v >= 85 ? 'rgba(16, 185, 129, 0.85)' : (v >= 75 ? 'rgba(59, 130, 246, 0.85)' : 'rgba(239, 68, 68, 0.85)'));
+    const barBorderColors = attValues.map(v => v >= 85 ? '#059669' : (v >= 75 ? '#2563eb' : '#dc2626'));
+
+    const highCount = attValues.filter(v => v >= 85).length;
+    const goodCount = attValues.filter(v => v >= 75 && v < 85).length;
+    const riskCount = attValues.filter(v => v < 75).length;
+
+    if (typeof Chart !== "undefined") {
+      const ctxBar = canvasMarks.getContext("2d");
+      aiBarChartInstance = new Chart(ctxBar, {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [{
+            label: "Subject & Lab Attendance %",
+            data: attValues,
+            backgroundColor: barColors,
+            borderColor: barBorderColors,
+            borderWidth: 1.5,
+            borderRadius: 8
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { beginAtZero: true, max: 100, ticks: { callback: (val) => val + "%" }, grid: { color: "#f1f5f9" } },
+            x: { grid: { display: false } }
+          }
+        }
+      });
+
+      const ctxPie = canvasAtt.getContext("2d");
+      aiPieChartInstance = new Chart(ctxPie, {
+        type: "doughnut",
+        data: {
+          labels: ["Excellent (≥85%)", "Good (75-84%)", "At Risk (<75%)"],
+          datasets: [{
+            data: [highCount, goodCount, riskCount],
+            backgroundColor: ["rgba(16, 185, 129, 0.85)", "rgba(59, 130, 246, 0.85)", "rgba(239, 68, 68, 0.85)"],
+            borderColor: ["#059669", "#2563eb", "#dc2626"],
+            borderWidth: 1.5
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: "bottom", labels: { font: { size: 11, weight: '600' } } } }
+        }
+      });
+    } else {
+      renderCanvasFallbackBar(canvasMarks, labels, attValues);
+      renderCanvasFallbackPie(canvasAtt, [highCount, goodCount, riskCount]);
+    }
+  }
+}
+
+function renderCanvasFallbackBar(canvas, labels, values) {
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width = canvas.parentElement.clientWidth || 400;
+  const h = canvas.height = 220;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#64748b";
+  ctx.font = "12px sans-serif";
+
+  const padding = 35;
+  const chartW = w - padding * 2;
+  const chartH = h - padding * 2;
+  const barW = Math.max(10, (chartW / (values.length || 1)) - 10);
+
+  values.forEach((val, i) => {
+    const barH = (val / 100) * chartH;
+    const x = padding + i * (barW + 10);
+    const y = h - padding - barH;
+
+    ctx.fillStyle = val >= 75 ? "#22c55e" : (val >= 50 ? "#3b82f6" : "#f59e0b");
+    ctx.fillRect(x, y, barW, barH);
+
+    ctx.fillStyle = "#334155";
+    ctx.fillText(labels[i] || "", x, h - 10);
+    ctx.fillText(`${val}%`, x, y - 5);
+  });
+}
+
+function renderCanvasFallbackPie(canvas, counts) {
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width = canvas.parentElement.clientWidth || 400;
+  const h = canvas.height = 220;
+  const total = counts.reduce((a, b) => a + b, 0) || 1;
+
+  ctx.clearRect(0, 0, w, h);
+  const colors = ["#10b981", "#3b82f6", "#ef4444"];
+  let startAngle = 0;
+
+  counts.forEach((cnt, i) => {
+    const sliceAngle = (cnt / total) * 2 * Math.PI;
+    ctx.beginPath();
+    ctx.moveTo(w / 2, h / 2);
+    ctx.arc(w / 2, h / 2, 70, startAngle, startAngle + sliceAngle);
+    ctx.closePath();
+    ctx.fillStyle = colors[i];
+    ctx.fill();
+    startAngle += sliceAngle;
+  });
+}
+
+function openAiAnalysisModal(targetUsername, mode = "marks") {
+  const username = targetUsername || (currentUser ? currentUser.username : "");
+  if (!username) return;
+
+  currentAiAnalysisUsername = username;
+  currentAiAnalysisMode = mode;
+  const analytics = calculateStudentAnalytics(username);
+
+  const modal = $("aiAnalysisModal");
+  if (!modal) return;
+
+  const studentName = analytics.student ? analytics.student.name : username;
+  const card6 = $("aiMetricCard6");
+
+  if (mode === "marks") {
+    const isI1Only = analytics.internalsMode === "i1_only";
+    const isBoth = analytics.internalsMode === "both";
+    const modeLabel = isI1Only ? "1st Int" : (isBoth ? "Both Int" : "Marks");
+
+    if ($("aiModalHeaderIcon")) $("aiModalHeaderIcon").textContent = "📈";
+    $("aiModalTitle").textContent = `AI Marks Analytics: ${studentName}`;
+    $("aiModalSubtitle").textContent = isI1Only
+      ? `1st Internal Test Real Marks Evaluation (${analytics.student ? (analytics.student.semester || 'Current Semester') : 'Student Portal'})`
+      : (isBoth ? `1st & 2nd Internal Exams Real Marks Evaluation (${analytics.student ? (analytics.student.semester || 'Current Semester') : 'Student Portal'})` : `Academic Real Marks Evaluation`);
+
+    // Card 1: Top Performing Subject (Theory)
+    $("aiMetricIcon1").textContent = "🏆";
+    $("aiMetricLabel1").textContent = `Top Subject (${modeLabel})`;
+    $("aiMetricVal1").textContent = analytics.topTheoryMarks ? (analytics.topTheoryMarks.short || analytics.topTheoryMarks.name) : "--";
+    if (analytics.topTheoryMarks) {
+      if (isI1Only) $("aiMetricBadge1").textContent = `${analytics.topTheoryMarks.i1Val} / ${analytics.topTheoryMarks.i1Max} Marks`;
+      else $("aiMetricBadge1").textContent = `${analytics.topTheoryMarks.markObtained} / ${analytics.topTheoryMarks.markMax} Marks`;
+    } else {
+      $("aiMetricBadge1").textContent = "--";
+    }
+    $("aiMetricBadge1").className = "metric-badge good";
+
+    // Card 2: Low Performing Subject (Theory)
+    $("aiMetricIcon2").textContent = "🎯";
+    $("aiMetricLabel2").textContent = `Low Subject (${modeLabel})`;
+    $("aiMetricVal2").textContent = analytics.lowTheoryMarks ? (analytics.lowTheoryMarks.short || analytics.lowTheoryMarks.name) : "--";
+    if (analytics.lowTheoryMarks) {
+      if (isI1Only) $("aiMetricBadge2").textContent = `${analytics.lowTheoryMarks.i1Val} / ${analytics.lowTheoryMarks.i1Max} Marks`;
+      else $("aiMetricBadge2").textContent = `${analytics.lowTheoryMarks.markObtained} / ${analytics.lowTheoryMarks.markMax} Marks`;
+    } else {
+      $("aiMetricBadge2").textContent = "--";
+    }
+    $("aiMetricBadge2").className = "metric-badge warn";
+
+    // Card 3: Top Performing Lab (Practical)
+    $("aiMetricIcon3").textContent = "🧪";
+    $("aiMetricLabel3").textContent = `Top Lab (${modeLabel})`;
+    $("aiMetricVal3").textContent = analytics.topLabMarks ? (analytics.topLabMarks.short || analytics.topLabMarks.name) : "No Labs";
+    if (analytics.topLabMarks) {
+      if (isI1Only) $("aiMetricBadge3").textContent = `${analytics.topLabMarks.i1Val} / ${analytics.topLabMarks.i1Max} Marks`;
+      else $("aiMetricBadge3").textContent = `${analytics.topLabMarks.markObtained} / ${analytics.topLabMarks.markMax} Marks`;
+    } else {
+      $("aiMetricBadge3").textContent = "--";
+    }
+    $("aiMetricBadge3").className = "metric-badge good";
+
+    // Card 4: Low Performing Lab (Practical)
+    $("aiMetricIcon4").textContent = "🔬";
+    $("aiMetricLabel4").textContent = `Low Lab (${modeLabel})`;
+    $("aiMetricVal4").textContent = analytics.lowLabMarks ? (analytics.lowLabMarks.short || analytics.lowLabMarks.name) : "No Labs";
+    if (analytics.lowLabMarks) {
+      if (isI1Only) $("aiMetricBadge4").textContent = `${analytics.lowLabMarks.i1Val} / ${analytics.lowLabMarks.i1Max} Marks`;
+      else $("aiMetricBadge4").textContent = `${analytics.lowLabMarks.markObtained} / ${analytics.lowLabMarks.markMax} Marks`;
+    } else {
+      $("aiMetricBadge4").textContent = "--";
+    }
+    $("aiMetricBadge4").className = "metric-badge warn";
+
+    // Card 5: Total Real Marks (Replaced Grade Status)
+    $("aiMetricIcon5").textContent = "📊";
+    $("aiMetricLabel5").textContent = `Total Marks (${modeLabel})`;
+    if (isI1Only) {
+      $("aiMetricVal5").textContent = analytics.totalI1Max > 0 ? `${analytics.totalI1Obtained} / ${analytics.totalI1Max}` : "--";
+      $("aiMetricBadge5").textContent = `${analytics.avgI1Pct}% Aggregate`;
+    } else {
+      $("aiMetricVal5").textContent = analytics.totalMaxMarks > 0 ? `${analytics.totalObtainedMarks} / ${analytics.totalMaxMarks}` : "--";
+      $("aiMetricBadge5").textContent = `${analytics.avgMarksPct}% Aggregate`;
+    }
+    $("aiMetricBadge5").className = (isI1Only ? analytics.avgI1Pct : analytics.avgMarksPct) >= 70 ? "metric-badge good" : ((isI1Only ? analytics.avgI1Pct : analytics.avgMarksPct) >= 35 ? "metric-badge warn" : "metric-badge danger");
+
+    // Card 6: Hide for Marks Mode
+    if (card6) card6.style.display = "none";
+
+    // Chart titles
+    if (isI1Only) {
+      if ($("aiBarChartTitle")) $("aiBarChartTitle").textContent = "📊 1st Internal Real Marks Comparison (Bar Graph)";
+      if ($("aiBarChartChip")) $("aiBarChartChip").textContent = "1st Internal";
+      if ($("aiPieChartTitle")) $("aiPieChartTitle").textContent = "🥧 1st Internal Grade Tier Breakdown (Pie Chart)";
+      if ($("aiPieChartChip")) $("aiPieChartChip").textContent = "1st Internal Tiers";
+    } else if (isBoth) {
+      if ($("aiBarChartTitle")) $("aiBarChartTitle").textContent = "📊 Both Internals Real Marks Comparison (1st vs 2nd Internal Bar Graph)";
+      if ($("aiBarChartChip")) $("aiBarChartChip").textContent = "Both Internals";
+      if ($("aiPieChartTitle")) $("aiPieChartTitle").textContent = "🥧 Both Internals Overall Grade Breakdown (Pie Chart)";
+      if ($("aiPieChartChip")) $("aiPieChartChip").textContent = "Combined Tiers";
+    } else {
+      if ($("aiBarChartTitle")) $("aiBarChartTitle").textContent = "📊 Theory & Lab Real Marks Comparison (Bar Graph)";
+      if ($("aiBarChartChip")) $("aiBarChartChip").textContent = "Real Marks";
+      if ($("aiPieChartTitle")) $("aiPieChartTitle").textContent = "🥧 Marks Grade Tier Breakdown (Pie Chart)";
+      if ($("aiPieChartChip")) $("aiPieChartChip").textContent = "Score Tiers";
+    }
+
+  } else {
+    // Attendance mode
+    if ($("aiModalHeaderIcon")) $("aiModalHeaderIcon").textContent = "📊";
+    $("aiModalTitle").textContent = `AI Attendance Analytics: ${studentName}`;
+    $("aiModalSubtitle").textContent = `Theory Subject & Practical Lab Attendance Diagnostics (${analytics.student ? (analytics.student.semester || 'Current Semester') : 'Student Portal'})`;
+
+    // Card 1: Top Attendance Subject (Theory)
+    $("aiMetricIcon1").textContent = "🌟";
+    $("aiMetricLabel1").textContent = "Top Subject (Theory)";
+    $("aiMetricVal1").textContent = analytics.topTheoryAtt ? (analytics.topTheoryAtt.short || analytics.topTheoryAtt.name) : "--";
+    $("aiMetricBadge1").textContent = analytics.topTheoryAtt ? `${analytics.topTheoryAtt.attPct}% Att` : "--";
+    $("aiMetricBadge1").className = "metric-badge good";
+
+    // Card 2: Low Attendance Subject (Theory)
+    $("aiMetricIcon2").textContent = "⚠️";
+    $("aiMetricLabel2").textContent = "Low Subject (Theory)";
+    $("aiMetricVal2").textContent = analytics.lowTheoryAtt ? (analytics.lowTheoryAtt.short || analytics.lowTheoryAtt.name) : "--";
+    $("aiMetricBadge2").textContent = analytics.lowTheoryAtt ? `${analytics.lowTheoryAtt.attPct}% Att` : "--";
+    $("aiMetricBadge2").className = analytics.lowTheoryAtt && analytics.lowTheoryAtt.attPct < 75 ? "metric-badge danger" : "metric-badge warn";
+
+    // Card 3: Top Attendance Lab (Practical)
+    $("aiMetricIcon3").textContent = "🧪";
+    $("aiMetricLabel3").textContent = "Top Lab (Practical)";
+    $("aiMetricVal3").textContent = analytics.topLabAtt ? (analytics.topLabAtt.short || analytics.topLabAtt.name) : "No Labs";
+    $("aiMetricBadge3").textContent = analytics.topLabAtt ? `${analytics.topLabAtt.attPct}% Att` : "--";
+    $("aiMetricBadge3").className = "metric-badge good";
+
+    // Card 4: Low Attendance Lab (Practical)
+    $("aiMetricIcon4").textContent = "🔬";
+    $("aiMetricLabel4").textContent = "Low Lab (Practical)";
+    $("aiMetricVal4").textContent = analytics.lowLabAtt ? (analytics.lowLabAtt.short || analytics.lowLabAtt.name) : "No Labs";
+    $("aiMetricBadge4").textContent = analytics.lowLabAtt ? `${analytics.lowLabAtt.attPct}% Att` : "--";
+    $("aiMetricBadge4").className = analytics.lowLabAtt && analytics.lowLabAtt.attPct < 75 ? "metric-badge danger" : "metric-badge warn";
+
+    // Card 5: Overall Attendance (%)
+    $("aiMetricIcon5").textContent = "📊";
+    $("aiMetricLabel5").textContent = "Overall Attendance (%)";
+    $("aiMetricVal5").textContent = `${analytics.avgAttPct}% Overall`;
+    $("aiMetricBadge5").textContent = analytics.avgAttPct >= 75 ? "Eligible" : "At-Risk (<75%)";
+    $("aiMetricBadge5").className = analytics.avgAttPct >= 75 ? "metric-badge good" : "metric-badge danger";
+
+    // Card 6: Subjects < 75%
+    if (card6) card6.style.display = "flex";
+    $("aiMetricIcon6").textContent = "🚨";
+    $("aiMetricLabel6").textContent = "Subjects < 75%";
+    $("aiMetricVal6").textContent = `${analytics.lowAttendanceSubjects.length} Subject(s)`;
+    $("aiMetricBadge6").textContent = analytics.lowAttendanceSubjects.length === 0 ? "Compliant" : "Low Att Warning";
+    $("aiMetricBadge6").className = analytics.lowAttendanceSubjects.length === 0 ? "metric-badge good" : "metric-badge danger";
+
+    // Chart titles
+    if ($("aiBarChartTitle")) $("aiBarChartTitle").textContent = "📊 Theory & Lab Attendance Comparison (Bar Graph)";
+    if ($("aiBarChartChip")) $("aiBarChartChip").textContent = "Attendance %";
+    if ($("aiPieChartTitle")) $("aiPieChartTitle").textContent = "🥧 Attendance Status Ratio (Pie Chart)";
+    if ($("aiPieChartChip")) $("aiPieChartChip").textContent = "Attendance Ratio";
+  }
+
+  $("aiInsightsContent").innerHTML = generateAiInsights(analytics, mode);
+
+  setTimeout(() => {
+    renderAiCharts(analytics, mode);
+  }, 50);
+
+  modal.classList.remove("hidden");
+}
+
+function closeAiAnalysisModal() {
+  const modal = $("aiAnalysisModal");
+  if (modal) modal.classList.add("hidden");
+}
+
+function bindAiAnalysisEvents() {
+  const closeBtn = $("closeAiModalBtn");
+  const closeFooterBtn = $("closeAiModalFooterBtn");
+  const overlay = $("aiModalOverlay");
+  const refreshBtn = $("refreshAiInsightsBtn");
+  const topbarBtn = $("topbarAiBtn");
+
+  if (closeBtn) closeBtn.onclick = closeAiAnalysisModal;
+  if (closeFooterBtn) closeFooterBtn.onclick = closeAiAnalysisModal;
+  if (overlay) overlay.onclick = closeAiAnalysisModal;
+
+  if (topbarBtn) {
+    topbarBtn.onclick = () => {
+      if (currentUser && currentUser.role === "student") {
+        openAiAnalysisModal(currentUser.username);
+      }
+    };
+  }
+
+  if (refreshBtn) {
+    refreshBtn.onclick = () => {
+      refreshBtn.disabled = true;
+      refreshBtn.innerHTML = `<span>⏳ Analyzing...</span>`;
+      setTimeout(() => {
+        if (currentAiAnalysisUsername) {
+          const analytics = calculateStudentAnalytics(currentAiAnalysisUsername);
+          $("aiInsightsContent").innerHTML = generateAiInsights(analytics, currentAiAnalysisMode);
+          renderAiCharts(analytics, currentAiAnalysisMode);
+        }
+        refreshBtn.disabled = false;
+        refreshBtn.innerHTML = `<span>🔄 Refresh AI Insights</span>`;
+      }, 400);
+    };
+  }
+}
+
 function openPortal() {
   if (currentUser && currentUser.role === "faculty") {
     resetAttendanceFilters();
@@ -1250,30 +2293,7 @@ function openPortal() {
   $("userRole").textContent = roleLabel(currentUser.role, currentUser.subject);
   $("userAvatar").textContent = (currentUser.name || "U").charAt(0).toUpperCase();
 
-  const mobileBtn = $("mobileMenu");
-  const sidebar = document.querySelector(".sidebar");
-  const backdrop = $("sidebarBackdrop");
-
-  const closeMobileSidebar = () => {
-    if (sidebar) sidebar.classList.remove("open", "active");
-    if (backdrop) backdrop.classList.add("hidden");
-  };
-
-  if (mobileBtn && sidebar) {
-    mobileBtn.onclick = (e) => {
-      e.stopPropagation();
-      sidebar.classList.toggle("open");
-      sidebar.classList.toggle("active");
-      if (backdrop) {
-        backdrop.classList.toggle("hidden", !sidebar.classList.contains("active"));
-      }
-    };
-  }
-
-  if (backdrop) {
-    backdrop.onclick = closeMobileSidebar;
-  }
-
+  bindAiAnalysisEvents();
   buildNav();
   navigate("dashboard");
 }
@@ -1428,7 +2448,7 @@ function buildNav() {
     : currentUser.role === "faculty"
       ? [["dashboard", "🏠", "Dashboard"], ["attendance", "📊", "Attendance"], ["marks", "📈", "Marks"], ["assignments", "📝", "Assignments"], ["notes", "📚", "Notes"], ["timetable", "🗓️", "Timetable"], ["notices", "📢", "Notices"]]
       : [["dashboard", "🏠", "Dashboard"], ["students", "👥", "Students"], ["faculty", "🧑‍🏫", "Faculty"], ["timetable", "🗓️", "Timetable"], ["notices", "📢", "Notices"]];
-  
+
   const unreadNoticeCount = getUnreadNoticeCount();
   const unreadNotesCount = getUnreadNotesCount();
 
@@ -1449,6 +2469,11 @@ function buildNav() {
     topbarBtn.onclick = () => navigate("notices");
   }
 
+  const topbarAiBtn = $("topbarAiBtn");
+  if (topbarAiBtn) {
+    topbarAiBtn.classList.toggle("hidden", currentUser.role !== "student");
+  }
+
   updateNoticeBadges();
   updateNotesBadges();
 }
@@ -1464,10 +2489,6 @@ function navigate(page) {
   $("content").innerHTML = pages[page] ? pages[page]() : pages.dashboard();
   initPage(page);
 
-  const sidebar = document.querySelector(".sidebar");
-  const backdrop = $("sidebarBackdrop");
-  if (sidebar) sidebar.classList.remove("open", "active");
-  if (backdrop) backdrop.classList.add("hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -1789,36 +2810,6 @@ function bindFacultyEditProfileEvents() {
 
 bindFacultyEditProfileEvents();
 
-function initAdminUserManagement(role) {
-  const input = document.querySelector(`[data-user-search="${role}"]`);
-  if (input) {
-    input.oninput = () => {
-      const query = input.value.trim().toLowerCase();
-      document.querySelectorAll(`[data-user-row="${role}"]`).forEach(item => {
-        const name = (item.dataset.userName || "").toLowerCase();
-        const username = (item.dataset.userUsername || "").toLowerCase();
-        const matches = !query || name.includes(query) || username.includes(query);
-        item.style.display = matches ? "" : "none";
-      });
-    };
-  }
-
-  document.querySelectorAll("[data-remove-user-role]").forEach(button => {
-    button.addEventListener("click", () => {
-      const userRole = button.dataset.removeUserRole;
-      const username = button.dataset.removeUserUsername;
-      const name = button.dataset.removeUserName;
-      removeUserAccount(userRole, username)
-        .then(removed => {
-          if (!removed) return;
-          setAdminNotice(`${name} was removed from ${userRole === "student" ? "students" : "faculty"}.`, "success");
-          navigate(userRole === "student" ? "students" : "faculty");
-        })
-        .catch(error => setAdminNotice(error.message || "Unable to delete user.", "error"));
-    });
-  });
-}
-
 function recordAverage(values, ids) {
   const numbers = ids.map(id => values[id]).filter(v => typeof v === "number");
   if (!numbers.length) return 0;
@@ -1842,7 +2833,11 @@ function syncAssignmentsForStudents() {
 
   let added = false;
   assignmentGroups.forEach(group => {
-    const targetStudents = getStudentsForSubject(group.subject);
+    let targetStudents = getStudentsForSubject(group.subject);
+    const targetDiv = group.targetDivision || "All Divisions";
+    if (targetDiv && targetDiv !== "All Divisions") {
+      targetStudents = targetStudents.filter(s => (s.division || "Div A") === targetDiv);
+    }
     targetStudents.forEach(st => {
       if (!st || !st.username) return;
       const deleteKey = `${String(st.username).toLowerCase()}___${group.subject}___${group.title}___${group.due}`;
@@ -1859,6 +2854,7 @@ function syncAssignmentsForStudents() {
           id: group.id || ("assign_" + Date.now()),
           student: st.username,
           subject: group.subject,
+          targetDivision: targetDiv,
           title: group.title,
           description: group.description || "",
           fileName: group.fileName || "",
@@ -1872,7 +2868,18 @@ function syncAssignmentsForStudents() {
     });
   });
 
-  if (added) {
+  const initialCount = ACADEMIC.assignments.length;
+  ACADEMIC.assignments = ACADEMIC.assignments.filter(a => {
+    const targetDiv = a.targetDivision || "All Divisions";
+    if (targetDiv !== "All Divisions") {
+      const st = (USERS.student || []).find(u => String(u.username).toLowerCase() === String(a.student).toLowerCase());
+      const stDiv = st ? (st.division || "Div A") : "Div A";
+      if (stDiv !== targetDiv) return false;
+    }
+    return true;
+  });
+
+  if (added || ACADEMIC.assignments.length !== initialCount) {
     saveAcademicData();
   }
 }
@@ -1880,12 +2887,30 @@ function syncAssignmentsForStudents() {
 function getStudentAssignments(username) {
   syncAssignmentsForStudents();
   if (!username) return [];
-  return ACADEMIC.assignments.filter(a => String(a.student).toLowerCase() === String(username).toLowerCase());
+  const normUser = String(username).toLowerCase();
+  const st = (USERS.student || []).find(u => String(u.username).toLowerCase() === normUser);
+  const studentDiv = st ? (st.division || "Div A") : "Div A";
+
+  return ACADEMIC.assignments.filter(a => {
+    if (String(a.student).toLowerCase() !== normUser) return false;
+    const aDiv = a.targetDivision || "All Divisions";
+    if (aDiv !== "All Divisions" && aDiv !== studentDiv) return false;
+    return true;
+  });
 }
 
 function getSubjectAssignments(subject) {
   syncAssignmentsForStudents();
-  return ACADEMIC.assignments.filter(a => a.subject === subject);
+  return ACADEMIC.assignments.filter(a => {
+    if (a.subject !== subject) return false;
+    const targetDiv = a.targetDivision || "All Divisions";
+    if (targetDiv !== "All Divisions") {
+      const st = (USERS.student || []).find(u => String(u.username).toLowerCase() === String(a.student).toLowerCase());
+      const stDiv = st ? (st.division || "Div A") : "Div A";
+      if (stDiv !== targetDiv) return false;
+    }
+    return true;
+  });
 }
 
 function getNoticeList() {
@@ -1933,16 +2958,22 @@ function isFacultyOwnEntry(entry, facultyUser) {
   return false;
 }
 
-function getTimetableEntries(division = activeTimetableDivision) {
+function getTimetableEntries(division = activeTimetableDivision, semester = activeTimetableSemester) {
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  const isMaster = division === "Master View" || division === "All Divisions";
-  const targetDiv = (division || "Div A").replace("Section ", "Div ").replace("Division ", "Div ");
+  const targetDiv = (division || "").replace("Section ", "Div ").replace("Division ", "Div ");
+  const targetSem = semester || "";
+
+  if (!targetDiv || !targetSem) return [];
 
   return ACADEMIC.timetable
     .filter(e => {
-      if (isMaster) return true;
       const entryDiv = (e.division || "Div A").replace("Section ", "Div ").replace("Division ", "Div ");
-      return entryDiv === targetDiv;
+      if (entryDiv !== targetDiv) return false;
+
+      const entrySem = e.semester || (subjectById(e.subject) ? subjectById(e.subject).semester : "") || "";
+      if (entrySem && entrySem !== targetSem) return false;
+
+      return true;
     })
     .slice()
     .sort((a, b) => {
@@ -2391,7 +3422,7 @@ function initAssignmentsPage() {
         const title = $("assignmentTitle").value.trim();
         const description = $("assignmentDescription") ? $("assignmentDescription").value.trim() : "";
         const due = $("assignmentDue").value;
-        const status = $("assignmentStatus").value;
+        const status = "Pending";
         const fileInput = $("assignmentDocFile");
 
         if (!title || !due) {
@@ -2399,9 +3430,14 @@ function initAssignmentsPage() {
           $("assignmentMessage").className = "message error";
           return;
         }
-        const targetStudents = getStudentsForSubject(currentUser.subject);
+        const targetDiv = $("assignmentTargetDivision") ? $("assignmentTargetDivision").value : "All Divisions";
+        let targetStudents = getStudentsForSubject(currentUser.subject);
+        if (targetDiv && targetDiv !== "All Divisions") {
+          targetStudents = targetStudents.filter(s => (s.division || "Div A") === targetDiv);
+        }
+
         if (!targetStudents.length) {
-          $("assignmentMessage").textContent = "No students found for this subject.";
+          $("assignmentMessage").textContent = `No students found in ${targetDiv} for this subject.`;
           $("assignmentMessage").className = "message error";
           return;
         }
@@ -2417,6 +3453,7 @@ function initAssignmentsPage() {
               id: assignId,
               student: s.username,
               subject: currentUser.subject,
+              targetDivision: targetDiv,
               title,
               description,
               fileName: fileName || "",
@@ -2721,7 +3758,7 @@ function initNoticesPage() {
         const file = (fileInput && fileInput.files && fileInput.files.length) ? fileInput.files[0] : null;
         if (file) {
           const reader = new FileReader();
-          reader.onload = function(e) {
+          reader.onload = function (e) {
             publishNoticeObj(file.name, e.target.result);
           };
           reader.readAsDataURL(file);
@@ -2794,7 +3831,7 @@ function initAdminUserManagement(role = "student") {
 function downloadTimetableCSV(division = activeTimetableDivision) {
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const daysHeader = ["Timing", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  
+
   const isMasterView = division === "Master View" || division === "All Divisions";
   const displayDivision = isMasterView ? "All Divisions" : division;
   const rows = getTimetableEntries(displayDivision);
@@ -2826,8 +3863,8 @@ function downloadTimetableCSV(division = activeTimetableDivision) {
 
     const rowCells = [timeVal];
     days.forEach(dayName => {
-      const cellEntries = rows.filter(e => 
-        (e.time || "").replace(/\s+/g, "").toLowerCase() === (timeVal || "").replace(/\s+/g, "").toLowerCase() && 
+      const cellEntries = rows.filter(e =>
+        (e.time || "").replace(/\s+/g, "").toLowerCase() === (timeVal || "").replace(/\s+/g, "").toLowerCase() &&
         e.day === dayName
       );
       const text = Array.from(new Set(cellEntries.map(e => e.subjectText || (subjectById(e.subject) ? subjectById(e.subject).short || subjectById(e.subject).name : e.subject)).filter(Boolean))).join(" / ");
@@ -2847,8 +3884,8 @@ function downloadTimetableCSV(division = activeTimetableDivision) {
 }
 
 function printColorTimetablePDF(division) {
-  const targetDivision = (currentUser && currentUser.role === "student") 
-    ? (currentUser.division || "Div A") 
+  const targetDivision = (currentUser && currentUser.role === "student")
+    ? (currentUser.division || "Div A")
     : (division || activeTimetableDivision || "Div A");
 
   const rows = getTimetableEntries(targetDivision);
@@ -2990,34 +4027,34 @@ function printColorTimetablePDF(division) {
         </thead>
         <tbody>
           ${rowTimings.map(timeVal => {
-            const customBreaks = (ACADEMIC.customBreakRows && ACADEMIC.customBreakRows[targetDivision]) || {};
-            const cBreakTime = customBreaks.breakTime || "11:00-11:15";
-            const cBreakLabel = customBreaks.breakLabel || "Break Time";
-            const cLunchTime = customBreaks.lunchTime || "1:15-2:00";
-            const cLunchLabel = customBreaks.lunchLabel || "Lunch Break";
+    const customBreaks = (ACADEMIC.customBreakRows && ACADEMIC.customBreakRows[targetDivision]) || {};
+    const cBreakTime = customBreaks.breakTime || "11:00-11:15";
+    const cBreakLabel = customBreaks.breakLabel || "Break Time";
+    const cLunchTime = customBreaks.lunchTime || "1:15-2:00";
+    const cLunchLabel = customBreaks.lunchLabel || "Lunch Break";
 
-            const normT = (timeVal || "").replace(/\s+/g, "").toLowerCase();
-            const isBreak = normT.includes("11:00-11:15") || normT.includes("11-11:15") || normT === cBreakTime.replace(/\s+/g, "").toLowerCase();
-            const isLunch = normT.includes("1:15-2:00") || normT === cLunchTime.replace(/\s+/g, "").toLowerCase();
+    const normT = (timeVal || "").replace(/\s+/g, "").toLowerCase();
+    const isBreak = normT.includes("11:00-11:15") || normT.includes("11-11:15") || normT === cBreakTime.replace(/\s+/g, "").toLowerCase();
+    const isLunch = normT.includes("1:15-2:00") || normT === cLunchTime.replace(/\s+/g, "").toLowerCase();
 
-            if (isBreak) {
-              return `<tr class="break-row"><td class="time-col">${cBreakTime}</td><td colspan="6">${cBreakLabel}</td></tr>`;
-            }
-            if (isLunch) {
-              return `<tr class="lunch-row"><td class="time-col">${cLunchTime}</td><td colspan="6">${cLunchLabel}</td></tr>`;
-            }
-            return `<tr>
+    if (isBreak) {
+      return `<tr class="break-row"><td class="time-col">${cBreakTime}</td><td colspan="6">${cBreakLabel}</td></tr>`;
+    }
+    if (isLunch) {
+      return `<tr class="lunch-row"><td class="time-col">${cLunchTime}</td><td colspan="6">${cLunchLabel}</td></tr>`;
+    }
+    return `<tr>
               <td class="time-col">${timeVal}</td>
               ${DAYS_HEADER.map(d => {
-                const cellEntries = rows.filter(e => (e.time || "").replace(/\s+/g, "").toLowerCase() === (timeVal || "").replace(/\s+/g, "").toLowerCase() && e.day === d.full);
-                const ownEntries = cellEntries.filter(e => isFacultyOwnEntry(e, currentUser));
-                const subjectText = currentUser.role === "faculty"
-                  ? (ownEntries.length ? (ownEntries[0].subjectText || (subjectById(ownEntries[0].subject) ? subjectById(ownEntries[0].subject).short || subjectById(ownEntries[0].subject).name : ownEntries[0].subject)) : "")
-                  : Array.from(new Set(cellEntries.map(e => e.subjectText || (subjectById(e.subject) ? subjectById(e.subject).short || subjectById(e.subject).name : e.subject)).filter(Boolean))).join(" / ");
-                return `<td>${subjectText ? `<span class="subject-chip">${subjectText}</span>` : '-'}</td>`;
-              }).join('')}
+      const cellEntries = rows.filter(e => (e.time || "").replace(/\s+/g, "").toLowerCase() === (timeVal || "").replace(/\s+/g, "").toLowerCase() && e.day === d.full);
+      const ownEntries = cellEntries.filter(e => isFacultyOwnEntry(e, currentUser));
+      const subjectText = currentUser.role === "faculty"
+        ? (ownEntries.length ? (ownEntries[0].subjectText || (subjectById(ownEntries[0].subject) ? subjectById(ownEntries[0].subject).short || subjectById(ownEntries[0].subject).name : ownEntries[0].subject)) : "")
+        : Array.from(new Set(cellEntries.map(e => e.subjectText || (subjectById(e.subject) ? subjectById(e.subject).short || subjectById(e.subject).name : e.subject)).filter(Boolean))).join(" / ");
+      return `<td>${subjectText ? `<span class="subject-chip">${subjectText}</span>` : '-'}</td>`;
+    }).join('')}
             </tr>`;
-          }).join('')}
+  }).join('')}
         </tbody>
       </table>
       <script>
@@ -3034,10 +4071,19 @@ function printColorTimetablePDF(division) {
 }
 
 function initTimetablePage() {
-  const select = $("timetableDivisionSelect");
-  if (select) {
-    select.addEventListener("change", () => {
-      activeTimetableDivision = select.value;
+  const divSelect = $("timetableDivisionSelect");
+  if (divSelect) {
+    divSelect.addEventListener("change", () => {
+      activeTimetableDivision = divSelect.value;
+      isTimetableEditMode = false;
+      navigate("timetable");
+    });
+  }
+
+  const semSelect = $("timetableSemesterSelect");
+  if (semSelect) {
+    semSelect.addEventListener("change", () => {
+      activeTimetableSemester = semSelect.value;
       isTimetableEditMode = false;
       navigate("timetable");
     });
@@ -3046,8 +4092,8 @@ function initTimetablePage() {
   const downloadBtn = $("btnDownloadTimetable");
   if (downloadBtn) {
     downloadBtn.addEventListener("click", () => {
-      const targetDiv = (currentUser && currentUser.role === "student") 
-        ? (currentUser.division || "Div A") 
+      const targetDiv = (currentUser && currentUser.role === "student")
+        ? (currentUser.division || "Div A")
         : activeTimetableDivision;
       printColorTimetablePDF(targetDiv);
     });
@@ -3106,11 +4152,14 @@ function initTimetablePage() {
         if (!ACADEMIC.timetableHeader) ACADEMIC.timetableHeader = {};
         const titleVal = titleInput ? titleInput.value.trim() : "";
         const subtitleVal = subtitleInput ? subtitleInput.value.trim() : "";
+        const headerKey = `${activeTimetableSemester}_${targetDivision}`;
 
-        ACADEMIC.timetableHeader[targetDivision] = {
+        const headerObj = {
           title: titleVal || "BHARATESH COLLEGE OF COMPUTER APPLICATIONS 2026",
           subtitle: subtitleVal
         };
+        ACADEMIC.timetableHeader[headerKey] = headerObj;
+        ACADEMIC.timetableHeader[targetDivision] = headerObj;
       }
 
       const breakTimeInp = $("breakTimeInput");
@@ -3230,11 +4279,21 @@ const pages = {
     const attendance = Math.round(recordAverage(record.attendance, visibleSubjects.map(s => s.id)));
     const assignmentCount = getStudentAssignments(currentUser.username).length;
     const noticeCount = getNoticeList().length;
-    return `<div class="welcome"><div><p class="eyebrow">Welcome back</p><h1>${currentUser.name} 👋</h1><p>Your academic overview is ready.</p></div><div class="welcome-icon">🎓</div></div>
-      <div class="stat-grid"><div class="stat"><span>📚</span><b>${visibleSubjects.length}</b><small>Subjects</small></div>
+    return `<div class="welcome">
+      <div>
+        <p class="eyebrow">Welcome back</p>
+        <h1>${currentUser.name} 👋</h1>
+        <p>Your academic overview is ready.</p>
+      </div>
+      <div class="welcome-icon">🎓</div>
+    </div>
+    <div class="stat-grid"><div class="stat"><span>📚</span><b>${visibleSubjects.length}</b><small>Subjects</small></div>
       <div class="stat"><span>📊</span><b>${attendance}%</b><small>Average Attendance</small></div>
       <div class="stat"><span>📢</span><b>${noticeCount}</b><small>Notices</small></div></div>
-      <section class="panel"><div class="panel-head"><h3>Subject Overview</h3></div>
+      <section class="panel">
+        <div class="panel-head">
+          <h3>Subject Overview</h3>
+        </div>
       <div class="subject-grid">${visibleSubjects.map(s => {
       const markValue = typeof record.marks[s.id] === "number" ? `${record.marks[s.id]}/100` : "--";
       return `<div class="subject-card">${s.icon ? `<div class="subject-icon">${s.icon}</div>` : ''}<div><b>${s.short}</b><small>${s.name}</small></div><strong>${markValue}</strong></div>`;
@@ -3266,14 +4325,14 @@ const pages = {
 
       const theorySubjectsMarkup = theorySubjects.length
         ? `<div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;">` +
-          theorySubjects.map(s => `<span class="subject-tag theory-tag" style="background:#eef2ff; color:#3730a3; padding:6px 14px; border-radius:10px; font-size:13px; font-weight:600; border:1px solid #c7d2fe;">📖 ${s.name} (${s.short})</span>`).join("") +
-          `</div>`
+        theorySubjects.map(s => `<span class="subject-tag theory-tag" style="background:#eef2ff; color:#3730a3; padding:6px 14px; border-radius:10px; font-size:13px; font-weight:600; border:1px solid #c7d2fe;">📖 ${s.name}</span>`).join("") +
+        `</div>`
         : `<b style="color: #64748b; font-size: 14px; display: block;">${isConfigured ? "No theory subjects listed for this semester" : "Please select your semester in Edit Profile to view enrolled subjects"}</b>`;
 
       const labSubjectsMarkup = labSubjects.length
         ? `<div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;">` +
-          labSubjects.map(s => `<span class="subject-tag lab-tag" style="background:#e0f2fe; color:#075985; padding:6px 14px; border-radius:10px; font-size:13px; font-weight:600; border:1px solid #bae6fd;">🧪 ${s.name} (${s.short})</span>`).join("") +
-          `</div>`
+        labSubjects.map(s => `<span class="subject-tag lab-tag" style="background:#e0f2fe; color:#075985; padding:6px 14px; border-radius:10px; font-size:13px; font-weight:600; border:1px solid #bae6fd;">🧪 ${s.name}</span>`).join("") +
+        `</div>`
         : `<b style="color: #64748b; font-size: 14px; display: block;">${isConfigured ? "No practical lab subjects for this semester" : "Please select your semester in Edit Profile to view enrolled labs"}</b>`;
 
       return `<section class="panel profile">
@@ -3686,7 +4745,12 @@ const pages = {
       <section class="panel">
         <div class="panel-head">
           <h3>Subject Attendance Summary</h3>
-          <span class="badge">Overall Progress</span>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button type="button" class="ai-analysis-btn ai-analysis-btn-sm" onclick="openAiAnalysisModal('${currentUser.username}', 'attendance')">
+              <span>📊 AI Attendance Analysis</span>
+            </button>
+            <span class="badge">Overall Progress</span>
+          </div>
         </div>
         <div class="table-wrap">
           <table>
@@ -3792,6 +4856,7 @@ const pages = {
             <td>${idx + 1}</td>
             <td><strong class="student-name">${s.name}</strong></td>
             <td><code class="uucms-code">${s.username}</code></td>
+            <td><code class="uucms-code">${s.division || 'Div A'}</code></td>
             <td>
               <input type="number" 
                 class="marks-input-field" 
@@ -3881,6 +4946,7 @@ const pages = {
                       <th>#</th>
                       <th>Student Name</th>
                       <th>Username</th>
+                      <th>Division</th>
                       <th>1st Internal</th>
                       <th>2nd Internal</th>
                       <th>Assignment</th>
@@ -3957,9 +5023,14 @@ const pages = {
         <div class="panel-head">
           <div>
             <h3>Academic Marks Statement</h3>
-            <small style="color:#64748b;">Detailed breakdown of Internal Exams & Assignment Marks</small>
+            <small style="color:#64748b;">Detailed breakdown of Internal Exams & Assignment Marks • ${currentUser.semester || '1st Semester'} (${currentUser.division || 'Div A'})</small>
           </div>
-          <span class="badge">Student Statement</span>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button type="button" class="ai-analysis-btn ai-analysis-btn-sm" onclick="openAiAnalysisModal('${currentUser.username}', 'marks')">
+              <span>📈 AI Marks Analysis</span>
+            </button>
+            <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700;">${currentUser.division || 'Div A'} • Student Statement</span>
+          </div>
         </div>
 
         <div class="table-wrap">
@@ -4008,14 +5079,42 @@ const pages = {
       });
 
       return `<section class="panel"><div class="panel-head"><h3>Assignments</h3><span class="badge">Faculty Input</span></div>
-        <form id="assignmentForm" class="entry-form">
-        <label>Assignment Title</label><div class="input-wrap"><input id="assignmentTitle" type="text" required placeholder="Enter assignment title (e.g. Unit 1 Assignment)"></div>
-        <label>Details / Description (Text)</label><div class="input-wrap"><textarea id="assignmentDescription" rows="3" placeholder="Enter assignment instructions, guidelines, or questions..." style="width: 100%; height: 97px; resize: vertical;"></textarea></div>
-        <label>Attach Document File (Optional)</label><div class="input-wrap"><input id="assignmentDocFile" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg,.zip" style="padding:6px; font-size:13px;"></div>
-        <small style="color:#64748b; margin-top:-4px; margin-bottom:8px; display:block;">Attach a PDF, Word doc, text file, or image (Optional)</small>
-        <label>Submission Date</label><div class="input-wrap"><input id="assignmentDue" type="date" required></div>
-        <label>Status</label><div class="input-wrap"><select id="assignmentStatus"><option value="Pending">Pending</option><option value="Submitted">Submitted</option></select></div>
-        <button class="primary-btn" type="submit"><span>Add Assignment</span><span class="arrow">→</span></button>
+        <form id="assignmentForm" class="entry-form" style="display:flex; flex-direction:column; gap:16px;">
+        <div style="margin-bottom:4px;">
+          <label style="display:block; margin-bottom:6px; font-weight:700; color:#334155; font-size:13px;">Assignment Title</label>
+          <div class="input-wrap"><input id="assignmentTitle" type="text" required placeholder="Enter assignment title (e.g. Unit 1 Assignment)"></div>
+        </div>
+
+        <div style="margin-bottom:4px;">
+          <label style="display:block; margin-bottom:6px; font-weight:700; color:#334155; font-size:13px;">Details / Description (Text)</label>
+          <div class="input-wrap"><textarea id="assignmentDescription" rows="3" placeholder="Enter assignment instructions, guidelines, or questions..." style="width: 100%; height: 97px; resize: vertical;"></textarea></div>
+        </div>
+
+        <div style="margin-bottom:4px;">
+          <label style="display:block; margin-bottom:6px; font-weight:700; color:#334155; font-size:13px;">Target Division</label>
+          <div class="input-wrap">
+            <select id="assignmentTargetDivision">
+              <option value="All Divisions">All Divisions</option>
+              <option value="Div A">Div A</option>
+              <option value="Div B">Div B</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-bottom:4px;">
+          <label style="display:block; margin-bottom:6px; font-weight:700; color:#334155; font-size:13px;">Attach Document File (Optional)</label>
+          <div class="input-wrap"><input id="assignmentDocFile" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg,.zip" style="padding:6px; font-size:13px;"></div>
+          <small style="color:#64748b; margin-top:6px; display:block;">Attach a PDF, Word doc, text file, or image (Optional)</small>
+        </div>
+
+        <div style="margin-bottom:4px;">
+          <label style="display:block; margin-bottom:6px; font-weight:700; color:#334155; font-size:13px;">Submission Date</label>
+          <div class="input-wrap"><input id="assignmentDue" type="date" required></div>
+        </div>
+
+        <div style="margin-top:6px;">
+          <button class="primary-btn" type="submit"><span>Add Assignment</span><span class="arrow">→</span></button>
+        </div>
         <p id="assignmentMessage" class="message"></p></form>
         
         <div class="panel-head" style="margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 20px;">
@@ -4185,9 +5284,9 @@ const pages = {
         <h4 style="margin:0 0 14px 0; color:#1e293b; display:flex; align-items:center; gap:6px;"><span>📚</span> Shared Notes History (${facultyNotes.length})</h4>
         <div class="assignment-list">
           ${facultyNotes.length ? facultyNotes.map(n => {
-            const hasFile = !!n.fileData;
-            const sub = subjectById(n.subject) || { name: n.subject, icon: "📚" };
-            return `<article class="assignment" style="border-left:4px solid #0284c7;">
+        const hasFile = !!n.fileData;
+        const sub = subjectById(n.subject) || { name: n.subject, icon: "📚" };
+        return `<article class="assignment" style="border-left:4px solid #0284c7;">
               <div class="assignment-icon">${sub.icon || '📚'}</div>
               <div class="assignment-main">
                 <b style="font-size:15px; color:#1e293b;">${n.title}</b>
@@ -4198,7 +5297,7 @@ const pages = {
               </div>
               <button type="button" class="btn-delete-note" data-note-id="${n.id}" style="background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; padding:6px 12px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer;" title="Delete this note">🗑️ Delete</button>
             </article>`;
-          }).join("") : `<div class="empty-state">No notes shared for ${subjectName} yet. Upload notes using the form above.</div>`}
+      }).join("") : `<div class="empty-state">No notes shared for ${subjectName} yet. Upload notes using the form above.</div>`}
         </div>
       </section>`;
     }
@@ -4239,9 +5338,9 @@ const pages = {
 
       <div class="assignment-list" id="studentNotesContainer">
         ${allNotes.length ? allNotes.map(n => {
-          const sub = subjectById(n.subject) || { name: n.subject || "General", short: n.subject || "General", icon: "📚" };
-          const hasFile = !!n.fileData;
-          return `<article class="assignment note-card-item" data-title="${(n.title || '').replace(/"/g, '&quot;')}" data-subject="${n.subject || ''}" style="border-left:4px solid #16a34a;">
+      const sub = subjectById(n.subject) || { name: n.subject || "General", short: n.subject || "General", icon: "📚" };
+      const hasFile = !!n.fileData;
+      return `<article class="assignment note-card-item" data-title="${(n.title || '').replace(/"/g, '&quot;')}" data-subject="${n.subject || ''}" style="border-left:4px solid #16a34a;">
             <div class="assignment-icon">${sub.icon || '📚'}</div>
             <div class="assignment-main">
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
@@ -4255,7 +5354,7 @@ const pages = {
               </small>
             </div>
           </article>`;
-        }).join("") : `<div class="empty-state">No study notes uploaded for your subjects yet.</div>`}
+    }).join("") : `<div class="empty-state">No study notes uploaded for your subjects yet.</div>`}
       </div>
     </section>`;
   },
@@ -4264,28 +5363,18 @@ const pages = {
     const isStudent = currentUser.role === "student";
     const isAdmin = currentUser.role === "admin";
 
-    if (isAdmin && (!activeTimetableDivision || activeTimetableDivision === "Master View" || activeTimetableDivision === "All Divisions")) {
-      activeTimetableDivision = "Div A";
-    } else if (isStudent && (!activeTimetableDivision || activeTimetableDivision === "Div A")) {
-      if (currentUser.division) {
-        activeTimetableDivision = currentUser.division;
-      }
+    if (isStudent) {
+      if (currentUser.division) activeTimetableDivision = currentUser.division;
+      if (currentUser.semester) activeTimetableSemester = currentUser.semester;
+    } else if (isFaculty && currentUser.subject) {
+      if (!activeTimetableSemester) activeTimetableSemester = getSemesterForSubject(currentUser.subject);
     }
 
-    const displayDivision = activeTimetableDivision || (currentUser.division || (isAdmin ? "Div A" : "All Divisions"));
-    const rows = getTimetableEntries(displayDivision);
+    const displayDivision = activeTimetableDivision || (isStudent ? (currentUser.division || "Div A") : "");
+    const displaySemester = activeTimetableSemester || (isStudent ? (currentUser.semester || "1st Semester") : (isFaculty && currentUser.subject ? getSemesterForSubject(currentUser.subject) : ""));
+
+    const rows = (displayDivision && displaySemester) ? getTimetableEntries(displayDivision, displaySemester) : [];
     const canEdit = isFaculty && isTimetableEditMode;
-    const isAllDivs = displayDivision === "All Divisions" || displayDivision === "Master View";
-    const divShort = isAllDivs ? "All Divisions" : (displayDivision === "Div A" ? "Div A" : "Div B");
-
-    const semString = currentUser.semester || (isFaculty ? getSemesterForSubject(currentUser.subject) : "") || "3rd Semester";
-    let semFormatted = "3rd sem";
-    const semMatch = semString.match(/(\d+)/);
-    if (semMatch) {
-      const n = semMatch[1];
-      const suffix = n === '1' ? 'st' : (n === '2' ? 'nd' : (n === '3' ? 'rd' : 'th'));
-      semFormatted = `${n}${suffix} sem`;
-    }
 
     const DAYS_HEADER = [
       { short: "Mon", full: "Monday" },
@@ -4312,23 +5401,35 @@ const pages = {
     const rowTimings = sortTimingsSerialwise(combinedTimes);
 
     const defaultHeaderTitle = "BHARATESH COLLEGE OF COMPUTER APPLICATIONS 2026";
-    const defaultHeaderSubtitle = isAllDivs ? `Time Table ${semFormatted} (All Divisions)` : `Time Table ${semFormatted} ${divShort}`;
-    const storedHeader = (ACADEMIC.timetableHeader && ACADEMIC.timetableHeader[displayDivision]) || {};
+    const headerKey = `${displaySemester}_${displayDivision}`;
+    const storedHeader = (ACADEMIC.timetableHeader && (ACADEMIC.timetableHeader[headerKey] || ACADEMIC.timetableHeader[displayDivision])) || {};
     const headerTitle = storedHeader.title || defaultHeaderTitle;
-    const headerSubtitle = storedHeader.subtitle || defaultHeaderSubtitle;
+    const headerSubtitle = (typeof storedHeader.subtitle === "string") ? storedHeader.subtitle : "";
 
     const renderMatrixTable = () => {
+      if (!displaySemester || !displayDivision) {
+        return `
+          <div class="empty-state" style="padding:45px 20px; text-align:center; background:#ffffff; border-radius:16px; border:1px solid #e2e8f0; margin-top:10px;">
+            <div style="font-size:36px; margin-bottom:10px;">🗓️</div>
+            <h3 style="margin:0 0 6px 0; color:#1e293b; font-size:16px; font-weight:700;">Please Select Semester & Division</h3>
+            <p style="margin:0; color:#64748b; font-size:13px;">Choose a Semester (1st to 6th) and Division (Div A / Div B) above to view or manage the timetable.</p>
+          </div>
+        `;
+      }
+
       return `
         <div class="college-timetable-container">
           <div class="college-header-banner" style="text-align:center; margin-bottom: 8px;">
             ${canEdit ? `
               <input id="timetableHeaderTitleInput" type="text" class="direct-cell-input" value="${(headerTitle || '').replace(/"/g, '&quot;')}" placeholder="College Title (e.g. BHARATESH COLLEGE OF COMPUTER APPLICATIONS 2026)" style="text-align:center; font-weight:800; font-size:17px; color:#1e293b; border:1px solid #c084fc; background:#ffffff; padding:4px 8px; border-radius:4px; margin-bottom:4px; width:100%; box-sizing:border-box;">
-              <input id="timetableHeaderSubtitleInput" type="text" class="direct-cell-input" value="${(headerSubtitle || '').replace(/<[^>]*>/g, '').replace(/"/g, '&quot;')}" placeholder="Subtitle (e.g. Time Table 3rd sem Div A)" style="text-align:center; font-weight:700; font-size:13.5px; color:#475569; border:1px solid #c084fc; background:#ffffff; padding:3px 8px; border-radius:4px; width:100%; box-sizing:border-box;">
+              <input id="timetableHeaderSubtitleInput" type="text" class="direct-cell-input" value="${(headerSubtitle || '').replace(/<[^>]*>/g, '').replace(/"/g, '&quot;')}" placeholder="Enter Timetable Subtitle here..." style="text-align:center; font-weight:700; font-size:13.5px; color:#475569; border:1px solid #c084fc; background:#ffffff; padding:3px 8px; border-radius:4px; width:100%; box-sizing:border-box;">
             ` : `
               <h2 style="text-align:center; margin:0 0 3px 0; font-size:17px; font-weight:800; color:#1e293b;">${headerTitle}</h2>
-              <div class="timetable-subtitle" style="text-align:center; font-size:13.5px; font-weight:700; color:#475569;">
-                ${headerSubtitle}
-              </div>
+              ${headerSubtitle ? `
+                <div class="timetable-subtitle" style="text-align:center; font-size:13.5px; font-weight:700; color:#475569;">
+                  ${headerSubtitle}
+                </div>
+              ` : ''}
             `}
           </div>
 
@@ -4420,31 +5521,24 @@ const pages = {
           const ownEntries = cellEntries.filter(e => isFacultyOwnEntry(e, currentUser));
           const otherEntries = cellEntries.filter(e => !isFacultyOwnEntry(e, currentUser) && (e.subjectText || e.subject));
 
-          const ownText = ownEntries.length ? (ownEntries[0].subjectText || (subjectById(ownEntries[0].subject) ? subjectById(ownEntries[0].subject).short || subjectById(ownEntries[0].subject).name : ownEntries[0].subject)) : "";
-          const otherText = otherEntries.length ? (otherEntries[0].subjectText || (subjectById(otherEntries[0].subject) ? subjectById(otherEntries[0].subject).short || subjectById(otherEntries[0].subject).name : otherEntries[0].subject)) : "";
-
-          const masterText = Array.from(new Set(cellEntries.map(e => {
-            const text = e.subjectText || (subjectById(e.subject) ? subjectById(e.subject).short || subjectById(e.subject).name : e.subject);
-            if (!text) return "";
-            return (isAllDivs && e.division) ? `${e.division}: ${text}` : text;
-          }).filter(Boolean))).join("\n");
+          const masterText = Array.from(new Set(cellEntries.map(e => e.subjectText || (subjectById(e.subject) ? subjectById(e.subject).short || subjectById(e.subject).name : e.subject)).filter(Boolean))).join("\n");
 
           return `
                           <td>
                             ${canEdit ? `
                               ${otherEntries.length > 0 ? `
-                                <div class="matrix-occupied-chip" title="Timing booked by another faculty: ${otherText}">
-                                  Occupied: ${otherText ? otherText.replace(/\n+/g, ' ') : ''}
+                                <div class="matrix-occupied-chip" title="Timing booked by another faculty: ${otherEntries[0].subjectText || ''}">
+                                  Occupied
                                 </div>
                               ` : `
                                 <textarea class="direct-cell-input"
                                           data-row-idx="${rowIdx}"
                                           data-day="${d.full}"
                                           rows="1"
-                                          placeholder="-">${ownText || ''}</textarea>
+                                          placeholder="-">${ownEntries.length ? (ownEntries[0].subjectText || (subjectById(ownEntries[0].subject) ? subjectById(ownEntries[0].subject).short || subjectById(ownEntries[0].subject).name : ownEntries[0].subject)) : ''}</textarea>
                               `}
                             ` : `
-                              <span class="matrix-subject-chip">${(isFaculty ? ownText : masterText) || '-'}</span>
+                              <span class="matrix-subject-chip">${(isFaculty ? (ownEntries.length ? (ownEntries[0].subjectText || (subjectById(ownEntries[0].subject) ? subjectById(ownEntries[0].subject).short || subjectById(ownEntries[0].subject).name : ownEntries[0].subject)) : '-') : masterText) || '-'}</span>
                             `}
                           </td>
                         `;
@@ -4478,9 +5572,22 @@ const pages = {
         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; white-space:nowrap;">
           ${!isStudent ? `
             <div style="display:flex; align-items:center; gap:6px;">
-              <label style="font-size:12px; font-weight:700; color:#475569;">Select Division:</label>
+              <label style="font-size:12px; font-weight:700; color:#475569;">Semester:</label>
+              <select id="timetableSemesterSelect" class="filter-select" style="padding:4px 10px; font-size:12px; font-weight:700; border-radius:8px;">
+                <option value="" ${!displaySemester ? "selected" : ""}>-- Select Semester --</option>
+                <option value="1st Semester" ${displaySemester === "1st Semester" ? "selected" : ""}>1st Semester</option>
+                <option value="2nd Semester" ${displaySemester === "2nd Semester" ? "selected" : ""}>2nd Semester</option>
+                <option value="3rd Semester" ${displaySemester === "3rd Semester" ? "selected" : ""}>3rd Semester</option>
+                <option value="4th Semester" ${displaySemester === "4th Semester" ? "selected" : ""}>4th Semester</option>
+                <option value="5th Semester" ${displaySemester === "5th Semester" ? "selected" : ""}>5th Semester</option>
+                <option value="6th Semester" ${displaySemester === "6th Semester" ? "selected" : ""}>6th Semester</option>
+              </select>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:12px; font-weight:700; color:#475569;">Division:</label>
               <select id="timetableDivisionSelect" class="filter-select" style="padding:4px 10px; font-size:12px; font-weight:700; border-radius:8px;">
-                ${!isAdmin ? `<option value="All Divisions" ${displayDivision === "All Divisions" || displayDivision === "Master View" ? "selected" : ""}>All Divisions</option>` : ''}
+                <option value="" ${!displayDivision ? "selected" : ""}>-- Select Division --</option>
                 <option value="Div A" ${displayDivision === "Div A" ? "selected" : ""}>Div A</option>
                 <option value="Div B" ${displayDivision === "Div B" ? "selected" : ""}>Div B</option>
               </select>
@@ -4558,15 +5665,15 @@ const pages = {
           <h3>Published Notices</h3>
         </div>
         <div class="notice-grid">${notices.length ? notices.map((n, idx) => {
-          const targetTag = (!n.target || n.target === "all")
-            ? `<span class="badge" style="background:#dcfce7; color:#14532d; font-size:11px;">Students & Faculty</span>`
-            : (n.target === "student"
-                ? `<span class="badge" style="background:#e0e7ff; color:#3730a3; font-size:11px;">Students Only</span>`
-                : `<span class="badge" style="background:#fef3c7; color:#92400e; font-size:11px;">Faculty Only</span>`);
+        const targetTag = (!n.target || n.target === "all")
+          ? `<span class="badge" style="background:#dcfce7; color:#14532d; font-size:11px;">Students & Faculty</span>`
+          : (n.target === "student"
+            ? `<span class="badge" style="background:#e0e7ff; color:#3730a3; font-size:11px;">Students Only</span>`
+            : `<span class="badge" style="background:#fef3c7; color:#92400e; font-size:11px;">Faculty Only</span>`);
 
-          const showDelete = canDeleteNotice(n, currentUser);
+        const showDelete = canDeleteNotice(n, currentUser);
 
-          return `
+        return `
           <article class="notice">
             <span>📢</span>
             <div style="flex:1;">
@@ -4587,7 +5694,7 @@ const pages = {
             </div>
             ${showDelete ? `<button class="delete-notice-btn" type="button" data-delete-notice-index="${idx}" title="Delete Notice">🗑️</button>` : ''}
           </article>`;
-        }).join("") : `<div class="empty-state">No notices published yet.</div>`}</div>
+      }).join("") : `<div class="empty-state">No notices published yet.</div>`}</div>
       </section>`;
     }
 
@@ -4597,11 +5704,11 @@ const pages = {
         <span class="notice-header-count">📢 ${countLabel}</span>
       </div>
       <div class="notice-grid">${notices.length ? notices.map(n => {
-        const targetTag = (!n.target || n.target === "all")
-          ? `<span class="badge" style="background:#dcfce7; color:#14532d; font-size:11px;">Students & Faculty</span>`
-          : `<span class="badge" style="background:#e0e7ff; color:#3730a3; font-size:11px;">Students Only</span>`;
+      const targetTag = (!n.target || n.target === "all")
+        ? `<span class="badge" style="background:#dcfce7; color:#14532d; font-size:11px;">Students & Faculty</span>`
+        : `<span class="badge" style="background:#e0e7ff; color:#3730a3; font-size:11px;">Students Only</span>`;
 
-        return `
+      return `
         <article class="notice">
           <span>📢</span>
           <div>
@@ -4620,17 +5727,19 @@ const pages = {
             ` : ''}
           </div>
         </article>`;
-      }).join("") : `<div class="empty-state">No notices available.</div>`}</div>
+    }).join("") : `<div class="empty-state">No notices available.</div>`}</div>
     </section>`;
   },
   students() {
     return `<section class="panel"><div class="panel-head"><div><h3>Student Management</h3><span class="badge">Admin Only</span></div></div>
       ${getAdminNoticeMarkup()}
       <div class="admin-search-wrap"><input type="search" data-user-search="student" placeholder="Search students by name, username, or division" aria-label="Search students"></div>
-      <div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th style="text-align:center !important;">Division</th><th>Course</th><th style="text-align:center !important;">Status</th><th style="text-align:center !important;">Action</th></tr></thead><tbody>${USERS.student.map(s => {
-        const studentDiv = s.division || "Div A";
-        return `<tr data-user-row="student" data-user-name="${s.name}" data-user-username="${s.username}" data-user-division="${studentDiv}"><td><strong>${s.name}</strong></td><td><code>${s.username}</code></td><td style="text-align:center !important;">${studentDiv}</td><td>BCA 3rd Sem</td><td style="text-align:center !important;"><span class="status good">Active</span></td><td class="admin-actions" style="text-align:center !important; vertical-align:middle !important;"><button class="danger-btn" type="button" data-remove-user-role="student" data-remove-user-username="${s.username}" data-remove-user-name="${s.name}" style="margin:0 auto !important; display:inline-block !important; height:28px; padding:0 12px; font-size:12px; font-weight:700;">Remove</button></td></tr>`;
-      }).join("") || `<tr><td colspan="6" style="text-align:center;">No students registered yet.</td></tr>`}</tbody></table></div></section>`;
+      <div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th style="text-align:center !important;">Division</th><th>Course Year & Semester</th><th style="text-align:center !important;">Status</th><th style="text-align:center !important;">Action</th></tr></thead><tbody>${USERS.student.map(s => {
+      const studentDiv = s.division || "Div A";
+      const studentSem = s.semester || "1st Semester";
+      const studentYear = s.courseYear || (studentSem === "3rd Semester" || studentSem === "4th Semester" ? "2nd Year" : (studentSem === "5th Semester" || studentSem === "6th Semester" ? "3rd Year" : "1st Year"));
+      return `<tr data-user-row="student" data-user-name="${s.name}" data-user-username="${s.username}" data-user-division="${studentDiv}"><td><strong>${s.name}</strong></td><td><code>${s.username}</code></td><td style="text-align:center !important;">${studentDiv}</td><td>${studentYear} - ${studentSem}</td><td style="text-align:center !important;"><span class="status good">Active</span></td><td class="admin-actions" style="text-align:center !important; vertical-align:middle !important;"><button class="danger-btn" type="button" data-remove-user-role="student" data-remove-user-username="${s.username}" data-remove-user-name="${s.name}" style="margin:0 auto !important; display:inline-block !important; height:28px; padding:0 12px; font-size:12px; font-weight:700;">Remove</button></td></tr>`;
+    }).join("") || `<tr><td colspan="6" style="text-align:center;">No students registered yet.</td></tr>`}</tbody></table></div></section>`;
   },
   faculty() {
     return `<section class="panel"><div class="panel-head"><div><h3>Faculty Management</h3><span class="badge">${USERS.faculty.length} Faculty</span></div></div>

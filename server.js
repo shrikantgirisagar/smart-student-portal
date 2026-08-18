@@ -12,7 +12,7 @@ const PORT = Number(process.env.PORT || 3000);
 const DB_FILE = path.join(__dirname, "data", "database.json");
 
 app.use(cors());
-app.use(express.json({ limit: "200kb" }));
+app.use(express.json({ limit: "50mb" }));
 
 // Serve the portal from the same Node.js server so Live Server is not required.
 // Only the frontend files are exposed; the private data/ folder is never served.

@@ -24,11 +24,7 @@ if not exist "node_modules\express" (
 )
 
 if not exist ".env" (
-  echo.
-  echo WARNING: .env was not found.
-  echo The portal can open, but real email OTP will not work until .env is configured.
-  echo See SETUP_EMAIL.bat or README.md.
-  echo.
+  echo PORT=3000 > ".env"
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue; if(-not $p){Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-Command','Set-Location -LiteralPath ''%~dp0''; node server.js'}"

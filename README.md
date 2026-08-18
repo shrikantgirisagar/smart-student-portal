@@ -20,7 +20,6 @@ Start_Smart_Student_Portal/
 ├── README.md                       # Project documentation & setup guide
 ├── Start_Smart_Student_Portal.bat  # 1-Click Local Launcher (starts server + opens browser)
 ├── Stop_Smart_Student_Portal.bat   # 1-Click Stopper (terminates backend on port 3000)
-├── Public_Online_Portal.bat        # 1-Click LocalTunnel Public Launcher for mobile data
 └── data/
     └── database.json               # Persistent JSON database storing user records
 ```
@@ -36,7 +35,7 @@ Start_Smart_Student_Portal/
   - **Student:** View profile details, attendance summary, subject marks, assignment status, and campus notices.
   - **Faculty:** Manage daily attendance, batch marks entry, assignment search, student queries, and profile settings.
   - **Admin:** Manage student/faculty user accounts, add/edit/delete records, and view system status.
-- **📱 Dynamic Host & Mobile Friendly:** Responsive design with dynamic API origin detection (`window.location.origin`) allowing seamless deployment on Localhost, Local Wi-Fi, or Cloud Hosting platforms (Render, Glitch, Vercel).
+- **🌐 Dynamic Origin Detection:** Modern web interface with dynamic API origin detection (`window.location.origin`).
 
 ---
 
@@ -70,52 +69,6 @@ npm install
 
 - **Stop Portal Backend:**
   Double-click `Stop_Smart_Student_Portal.bat` to safely terminate the backend process running on port 3000.
-
-- **Mobile Tunnel (Temporary Public Access):**
-  Double-click `Public_Online_Portal.bat` to launch the local server and generate a free public link via `localtunnel` for mobile users.
-
----
-
-## 🌐 24/7 Mobile Access: Deploy on Render.com
-
-To make your website **directly accessible to all students on their mobile phones 24/7** (on 4G/5G mobile data or any Wi-Fi network, without running your computer or batch scripts), host the portal for free on **[Render.com](https://render.com)**:
-
-### Step 1: Push Project to GitHub
-1. Create a free account at **[GitHub.com](https://github.com)**.
-2. Create a new repository named `Start_Smart_Student_Portal`.
-3. In your **Antigravity IDE Terminal**, run the following commands to push your code:
-   ```powershell
-   git init
-   git add .
-   git commit -m "Initial commit of Smart Student Portal"
-   git branch -M main
-   git remote add origin https://github.com/YOUR_USERNAME/Start_Smart_Student_Portal.git
-   git push -u origin main
-   ```
-
-### Step 2: Create Web Service on Render
-1. Sign up for a free account at **[Render.com](https://render.com)**.
-2. On your Render Dashboard, click **New +** → select **Web Service**.
-3. Connect your **GitHub** account and choose your `Start_Smart_Student_Portal` repository.
-4. Configure the service settings:
-   - **Name:** `smart-student-portal` (or your preferred site name)
-   - **Region:** Select closest region (e.g. Singapore / Oregon / Frankfurt)
-   - **Runtime:** `Node`
-   - **Build Command:** `npm install`
-   - **Start Command:** `node server.js`
-   - **Instance Type:** `Free`
-
-### Step 3: Add Environment Variables
-Scroll down to the **Environment Variables** section on Render and add:
-- `PORT` = `3000`
-
-### Step 4: Deploy & Share with Students
-1. Click **Create Web Service**. Render will automatically build your site and deploy it.
-2. Once deployment completes, Render will provide a free production URL:
-   ```text
-   https://smart-student-portal.onrender.com
-   ```
-3. **Share this link directly with your students!** Students can open this link on Chrome, Safari, or any browser on their smartphones anywhere in the world, 24 hours a day, 7 days a week.
 
 ---
 
