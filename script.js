@@ -282,6 +282,54 @@ function sanitizeClientUser(user) {
   return safe;
 }
 
+let pendingProfilePic = "";
+
+function getStudentPresetAvatars(nameStr = "S") {
+  const initial = (nameStr || "S").charAt(0).toUpperCase();
+  const createSvg = (c1, c2, accent) => `data:image/svg+xml;utf8,${encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+      <defs>
+        <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="${c1}" />
+          <stop offset="100%" stop-color="${c2}" />
+        </linearGradient>
+      </defs>
+      <rect width="120" height="120" rx="60" fill="url(#g)" />
+      <circle cx="60" cy="46" r="22" fill="#ffffff" opacity="0.92" />
+      <path d="M 24 104 C 24 76, 38 68, 60 68 C 82 68, 96 76, 96 104 Z" fill="#ffffff" opacity="0.92" />
+      <text x="60" y="53" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="800" fill="${accent}" text-anchor="middle">${initial}</text>
+    </svg>
+  `)}`;
+
+  return [
+    { id: "indigo", name: "Indigo Student", url: createSvg("#4f46e5", "#7c3aed", "#4f46e5") },
+    { id: "emerald", name: "Emerald Tech", url: createSvg("#059669", "#0d9488", "#059669") },
+    { id: "rose", name: "Rose Creative", url: createSvg("#e11d48", "#c026d3", "#e11d48") },
+    { id: "amber", name: "Amber Scholar", url: createSvg("#d97706", "#ea580c", "#d97706") }
+  ];
+}
+
+function getProfilePicUrl(user) {
+  if (user && user.profilePic) return user.profilePic;
+  const presets = getStudentPresetAvatars(user ? user.name : "S");
+  return presets[0].url;
+}
+
+function updateUserAvatarUI() {
+  const avatarEl = $("userAvatar");
+  if (!avatarEl || !currentUser) return;
+  const picUrl = getProfilePicUrl(currentUser);
+  if (currentUser.profilePic || currentUser.role === "student") {
+    avatarEl.innerHTML = `<img src="${picUrl}" alt="User Avatar" style="width:34px; height:34px; object-fit:cover; border-radius:50%; display:block;">`;
+    avatarEl.style.padding = "0";
+    avatarEl.style.background = "none";
+  } else {
+    avatarEl.textContent = (currentUser.name || "U").charAt(0).toUpperCase();
+    avatarEl.style.padding = "";
+    avatarEl.style.background = "";
+  }
+}
+
 function loadUsers() {
   const saved = localStorage.getItem("smartPortalUsers");
   if (saved) {
@@ -1021,6 +1069,31 @@ editProfileModal.innerHTML = `
       <p>Update your details serialwise step by step below.</p>
     </div>
     <form id="editProfileForm">
+      <div class="edit-profile-photo-wrap" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:16px; margin-bottom:18px;">
+        <label style="font-weight:700; color:#334155; font-size:13px; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:10px;">📸 Student Profile Picture</label>
+        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+          <img id="editProfilePreviewImg" src="" alt="Preview" class="profile-picture-img" style="width:72px; height:72px; border-radius:50%; object-fit:cover; border:3px solid #6366f1; box-shadow:0 4px 12px rgba(99,102,241,0.25);">
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" id="aiFaceScanBtn" class="face-scan-ai-btn" style="padding:7px 14px; font-size:12px; margin:0;">
+                <span>🤖 AI Face Camera Scan</span>
+              </button>
+              <label for="editProfilePicInput" class="primary-btn" style="cursor:pointer; padding:7px 14px; font-size:12px; display:inline-flex; align-items:center; gap:6px; width:fit-content; margin:0;">
+                <span>📁 Upload Photo</span>
+                <input type="file" id="editProfilePicInput" accept="image/*" style="display:none;">
+              </label>
+              <button type="button" id="adjustCropPhotoBtn" class="secondary-btn" style="padding:7px 14px; font-size:12px; display:inline-flex; align-items:center; gap:4px; margin:0;">
+                <span>✂️ Adjust / Crop</span>
+              </button>
+            </div>
+            <button type="button" id="removeProfilePicBtn" style="background:none; border:none; color:#ef4444; font-size:12px; font-weight:600; cursor:pointer; padding:0; text-align:left;">🗑️ Reset to Default Avatar</button>
+          </div>
+        </div>
+        <div style="margin-top:12px; border-top:1px dashed #cbd5e1; padding-top:10px;">
+          <small style="color:#64748b; font-weight:600; display:block; margin-bottom:8px;">Or pick a preset student avatar:</small>
+          <div id="presetAvatarsGrid" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;"></div>
+        </div>
+      </div>
       <label>1. Full Name</label>
       <div class="input-wrap"><span class="input-icon">👤</span><input id="editProfileName" disabled readonly placeholder="Full name"></div>
 
@@ -1089,6 +1162,423 @@ editProfileModal.innerHTML = `
     </form>
   </div>`;
 document.body.appendChild(editProfileModal);
+
+// LinkedIn Style Profile Picture Cropper Modal
+const cropImageModal = document.createElement("div");
+cropImageModal.id = "cropImageModal";
+cropImageModal.className = "modal-backdrop hidden";
+cropImageModal.innerHTML = `
+  <div class="signup-modal crop-modal-card">
+    <button type="button" id="closeCropModal" class="close-modal" aria-label="Close">×</button>
+    <div class="modal-icon">✂️</div>
+    <div class="modal-title">
+      <span>PROFILE PICTURE</span>
+      <h2>Crop & Adjust Photo</h2>
+      <p>Drag to reposition your photo and use the slider to zoom.</p>
+    </div>
+
+    <div class="crop-canvas-container" id="cropCanvasContainer">
+      <canvas id="cropCanvas" width="320" height="320"></canvas>
+    </div>
+
+    <div class="crop-controls-wrap">
+      <div class="crop-zoom-bar">
+        <span title="Zoom Out">➖</span>
+        <input type="range" id="cropZoomRange" class="crop-zoom-slider" min="0.5" max="3" step="0.02" value="1">
+        <span title="Zoom In">➕</span>
+      </div>
+      <div class="crop-btn-row">
+        <button type="button" id="cropRotateBtn" class="crop-action-btn">🔄 Rotate 90°</button>
+        <button type="button" id="cropResetBtn" class="crop-action-btn">↺ Reset View</button>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:12px; justify-content:flex-end;">
+      <button type="button" id="cancelCropBtn" class="secondary-btn" style="padding:10px 18px; font-size:13px;">Cancel</button>
+      <button type="button" id="applyCropBtn" class="primary-btn" style="padding:10px 22px; font-size:13px;">
+        <span>✨ Apply & Save Photo</span>
+      </button>
+    </div>
+  </div>`;
+document.body.appendChild(cropImageModal);
+
+let cropImg = null;
+let cropScale = 1;
+let cropOffsetX = 0;
+let cropOffsetY = 0;
+let cropRotation = 0;
+let isDraggingCrop = false;
+let dragStartX = 0;
+let dragStartY = 0;
+
+function drawCropCanvas() {
+  const canvas = $("cropCanvas");
+  if (!canvas || !cropImg || !cropImg.width) return;
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
+  const cx = w / 2;
+  const cy = h / 2;
+  const radius = 120;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // 1. Render Transformed Image
+  ctx.save();
+  ctx.translate(cx + cropOffsetX, cy + cropOffsetY);
+  ctx.rotate((cropRotation * Math.PI) / 180);
+
+  const minDim = Math.min(cropImg.width, cropImg.height);
+  const baseScale = (radius * 2) / minDim;
+  const currentScale = baseScale * cropScale;
+
+  const drawW = cropImg.width * currentScale;
+  const drawH = cropImg.height * currentScale;
+
+  ctx.drawImage(cropImg, -drawW / 2, -drawH / 2, drawW, drawH);
+  ctx.restore();
+
+  // 2. Render Semi-transparent LinkedIn Dark Mask
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, w, h);
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2, true);
+  ctx.fillStyle = "rgba(15, 23, 42, 0.65)";
+  ctx.fill();
+  ctx.restore();
+
+  // 3. Render Circular Cutout Guide Ring
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#ffffff";
+  ctx.shadowColor = "rgba(99, 102, 241, 0.8)";
+  ctx.shadowBlur = 10;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius + 1, 0, Math.PI * 2);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(99, 102, 241, 0.8)";
+  ctx.stroke();
+  ctx.restore();
+}
+
+function getCroppedResultDataUrl() {
+  if (!cropImg || !cropImg.width) return "";
+
+  const outCanvas = document.createElement("canvas");
+  outCanvas.width = 250;
+  outCanvas.height = 250;
+  const outCtx = outCanvas.getContext("2d");
+
+  const radius = 120;
+  const outCx = 125;
+  const outCy = 125;
+  const scaleRatio = 250 / (radius * 2);
+
+  const minDim = Math.min(cropImg.width, cropImg.height);
+  const baseScale = (radius * 2) / minDim;
+  const currentScale = baseScale * cropScale * scaleRatio;
+
+  const drawW = cropImg.width * currentScale;
+  const drawH = cropImg.height * currentScale;
+
+  outCtx.beginPath();
+  outCtx.arc(outCx, outCy, 125, 0, Math.PI * 2);
+  outCtx.clip();
+
+  outCtx.save();
+  outCtx.translate(outCx + cropOffsetX * scaleRatio, outCy + cropOffsetY * scaleRatio);
+  outCtx.rotate((cropRotation * Math.PI) / 180);
+  outCtx.drawImage(cropImg, -drawW / 2, -drawH / 2, drawW, drawH);
+  outCtx.restore();
+
+  return outCanvas.toDataURL("image/jpeg", 0.90);
+}
+
+function openCropModal(imageSource) {
+  const setupImage = (loadedImg) => {
+    cropImg = loadedImg;
+    cropScale = 1;
+    cropOffsetX = 0;
+    cropOffsetY = 0;
+    cropRotation = 0;
+    if ($("cropZoomRange")) $("cropZoomRange").value = 1;
+    cropImageModal.classList.remove("hidden");
+    setTimeout(drawCropCanvas, 50);
+  };
+
+  if (typeof imageSource === "string") {
+    const tempImg = new Image();
+    tempImg.crossOrigin = "Anonymous";
+    tempImg.onload = () => setupImage(tempImg);
+    tempImg.src = imageSource;
+  } else if (imageSource instanceof HTMLImageElement) {
+    setupImage(imageSource);
+  }
+}
+
+function closeCropModal() {
+  cropImageModal.classList.add("hidden");
+}
+
+function bindCropModalEvents() {
+  const container = $("cropCanvasContainer");
+  const zoomRange = $("cropZoomRange");
+  const rotateBtn = $("cropRotateBtn");
+  const resetBtn = $("cropResetBtn");
+  const cancelBtn = $("cancelCropBtn");
+  const closeBtn = $("closeCropModal");
+  const applyBtn = $("applyCropBtn");
+
+  if (closeBtn) closeBtn.addEventListener("click", closeCropModal);
+  if (cancelBtn) cancelBtn.addEventListener("click", closeCropModal);
+  cropImageModal.addEventListener("click", e => { if (e.target === cropImageModal) closeCropModal(); });
+
+  if (zoomRange) {
+    zoomRange.addEventListener("input", e => {
+      cropScale = parseFloat(e.target.value) || 1;
+      drawCropCanvas();
+    });
+  }
+
+  if (rotateBtn) {
+    rotateBtn.addEventListener("click", () => {
+      cropRotation = (cropRotation + 90) % 360;
+      drawCropCanvas();
+    });
+  }
+
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      cropScale = 1;
+      cropOffsetX = 0;
+      cropOffsetY = 0;
+      cropRotation = 0;
+      if (zoomRange) zoomRange.value = 1;
+      drawCropCanvas();
+    });
+  }
+
+  if (container) {
+    const handleStart = (clientX, clientY) => {
+      isDraggingCrop = true;
+      dragStartX = clientX - cropOffsetX;
+      dragStartY = clientY - cropOffsetY;
+    };
+
+    const handleMove = (clientX, clientY) => {
+      if (!isDraggingCrop) return;
+      cropOffsetX = clientX - dragStartX;
+      cropOffsetY = clientY - dragStartY;
+      drawCropCanvas();
+    };
+
+    const handleEnd = () => {
+      isDraggingCrop = false;
+    };
+
+    container.addEventListener("mousedown", e => handleStart(e.clientX, e.clientY));
+    window.addEventListener("mousemove", e => { if (isDraggingCrop) handleMove(e.clientX, e.clientY); });
+    window.addEventListener("mouseup", () => handleEnd());
+
+    container.addEventListener("touchstart", e => {
+      if (e.touches.length === 1) {
+        handleStart(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    }, { passive: true });
+
+    window.addEventListener("touchmove", e => {
+      if (isDraggingCrop && e.touches.length === 1) {
+        handleMove(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    }, { passive: true });
+
+    window.addEventListener("touchend", () => handleEnd());
+
+    container.addEventListener("wheel", e => {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.08 : -0.08;
+      cropScale = Math.min(Math.max(0.5, cropScale + delta), 3);
+      if (zoomRange) zoomRange.value = cropScale;
+      drawCropCanvas();
+    }, { passive: false });
+  }
+
+  if (applyBtn) {
+    applyBtn.addEventListener("click", () => {
+      const croppedDataUrl = getCroppedResultDataUrl();
+      if (croppedDataUrl) {
+        pendingProfilePic = croppedDataUrl;
+        const previewImg = $("editProfilePreviewImg");
+        if (previewImg) previewImg.src = croppedDataUrl;
+        renderPresetAvatarOptions();
+      }
+      closeCropModal();
+    });
+  }
+}
+
+bindCropModalEvents();
+
+// AI Face Scanner Modal
+const faceScanModal = document.createElement("div");
+faceScanModal.id = "faceScanModal";
+faceScanModal.className = "modal-backdrop hidden";
+faceScanModal.innerHTML = `
+  <div class="signup-modal face-scan-modal-card">
+    <button type="button" id="closeFaceScanModal" class="close-modal" aria-label="Close">×</button>
+    <div class="modal-icon">🤖</div>
+    <div class="modal-title">
+      <span>AI FACE SCANNER</span>
+      <h2>Auto Face Scan & Profile Photo</h2>
+      <p>Align your face inside the circle. The AI scanner will auto-detect and crop your profile photo.</p>
+    </div>
+
+    <div class="face-camera-viewport" id="faceCameraViewport">
+      <video id="faceScanVideo" class="face-camera-video" autoplay playsinline muted></video>
+      <div class="face-scanner-hud">
+        <div class="face-guide-ring">
+          <div class="laser-scan-line"></div>
+        </div>
+        <div id="faceScanStatus" class="scan-status-badge">
+          <span>🔍 Align your face inside circle</span>
+        </div>
+      </div>
+    </div>
+
+    <p id="faceScanErrMsg" class="message error" style="display:none; margin:8px 0;"></p>
+
+    <div class="camera-controls-bar">
+      <button type="button" id="cancelFaceScanBtn" class="secondary-btn" style="padding:10px 18px; font-size:13px;">Cancel</button>
+      <button type="button" id="captureFaceBtn" class="face-scan-ai-btn">
+        <span>📸 Scan & Auto-Set Photo</span>
+      </button>
+    </div>
+  </div>`;
+document.body.appendChild(faceScanModal);
+
+let cameraStream = null;
+let autoScanTimer = null;
+
+async function openFaceScanModal() {
+  const video = $("faceScanVideo");
+  const errEl = $("faceScanErrMsg");
+  const statusEl = $("faceScanStatus");
+  if (errEl) errEl.style.display = "none";
+  if (statusEl) statusEl.innerHTML = "<span>🔍 Camera starting...</span>";
+
+  faceScanModal.classList.remove("hidden");
+
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error("Webcam access is not supported by your browser or environment.");
+    }
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
+    });
+    if (video) {
+      video.srcObject = cameraStream;
+      await video.play();
+    }
+    if (statusEl) statusEl.innerHTML = "<span>✨ Align face & click Scan</span>";
+  } catch (err) {
+    console.error("Camera access error:", err);
+    if (errEl) {
+      errEl.textContent = "⚠️ Unable to access camera. " + (err.message || "Please grant camera permission.");
+      errEl.style.display = "block";
+    }
+    if (statusEl) statusEl.innerHTML = "<span>🚫 Camera Unavailable</span>";
+  }
+}
+
+function closeFaceScanModal() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+  if (autoScanTimer) {
+    clearTimeout(autoScanTimer);
+    autoScanTimer = null;
+  }
+  const video = $("faceScanVideo");
+  if (video) video.srcObject = null;
+  faceScanModal.classList.add("hidden");
+}
+
+function captureAndCropFace() {
+  const video = $("faceScanVideo");
+  if (!video || video.readyState < 2) return;
+
+  const canvas = document.createElement("canvas");
+  const w = video.videoWidth || 640;
+  const h = video.videoHeight || 480;
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+
+  // Mirror transform to match webcam preview
+  ctx.translate(w, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0, w, h);
+
+  // Auto detect face region or fallback center head crop
+  const cx = w / 2;
+  const cy = h * 0.45;
+  const faceDim = Math.min(w, h) * 0.55;
+
+  const outCanvas = document.createElement("canvas");
+  outCanvas.width = 250;
+  outCanvas.height = 250;
+  const outCtx = outCanvas.getContext("2d");
+
+  outCtx.beginPath();
+  outCtx.arc(125, 125, 125, 0, Math.PI * 2);
+  outCtx.clip();
+
+  outCtx.drawImage(
+    canvas,
+    cx - faceDim / 2,
+    cy - faceDim / 2,
+    faceDim,
+    faceDim,
+    0,
+    0,
+    250,
+    250
+  );
+
+  const scannedDataUrl = outCanvas.toDataURL("image/jpeg", 0.90);
+  if (scannedDataUrl) {
+    pendingProfilePic = scannedDataUrl;
+    const previewImg = $("editProfilePreviewImg");
+    if (previewImg) previewImg.src = scannedDataUrl;
+    renderPresetAvatarOptions();
+  }
+  closeFaceScanModal();
+}
+
+function bindFaceScanModalEvents() {
+  const closeBtn = $("closeFaceScanModal");
+  const cancelBtn = $("cancelFaceScanBtn");
+  const captureBtn = $("captureFaceBtn");
+
+  if (closeBtn) closeBtn.addEventListener("click", closeFaceScanModal);
+  if (cancelBtn) cancelBtn.addEventListener("click", closeFaceScanModal);
+  faceScanModal.addEventListener("click", e => { if (e.target === faceScanModal) closeFaceScanModal(); });
+
+  if (captureBtn) {
+    captureBtn.addEventListener("click", () => {
+      const statusEl = $("faceScanStatus");
+      if (statusEl) statusEl.innerHTML = "<span>⚡ Scanning & auto-cropping face...</span>";
+      setTimeout(captureAndCropFace, 150);
+    });
+  }
+}
+
+bindFaceScanModalEvents();
 
 const facultyEditProfileModal = document.createElement("div");
 facultyEditProfileModal.id = "facultyEditProfileModal";
@@ -2291,7 +2781,7 @@ function openPortal() {
   $("app").classList.remove("hidden");
   $("userName").textContent = currentUser.name;
   $("userRole").textContent = roleLabel(currentUser.role, currentUser.subject);
-  $("userAvatar").textContent = (currentUser.name || "U").charAt(0).toUpperCase();
+  updateUserAvatarUI();
 
   bindAiAnalysisEvents();
   buildNav();
@@ -2558,9 +3048,38 @@ function clearProfileStatusMessage() {
   sessionStorage.removeItem("profileStatusMessage");
 }
 
+function renderPresetAvatarOptions() {
+  const container = $("presetAvatarsGrid");
+  if (!container) return;
+  const presets = getStudentPresetAvatars(currentUser ? currentUser.name : "S");
+  const currentPicUrl = pendingProfilePic || getProfilePicUrl(currentUser);
+
+  container.innerHTML = presets.map(p => {
+    const isActive = currentPicUrl === p.url;
+    return `<button type="button" class="preset-avatar-btn ${isActive ? 'active' : ''}" title="${p.name}" data-url="${p.url}">
+      <img src="${p.url}" alt="${p.name}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;">
+    </button>`;
+  }).join("");
+
+  container.querySelectorAll(".preset-avatar-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      pendingProfilePic = btn.dataset.url;
+      const previewImg = $("editProfilePreviewImg");
+      if (previewImg) previewImg.src = pendingProfilePic;
+      container.querySelectorAll(".preset-avatar-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+}
+
 function openEditProfileModal() {
   if (!currentUser || currentUser.role !== "student") return;
   clearProfileStatusMessage();
+  pendingProfilePic = currentUser.profilePic || "";
+  const previewImg = $("editProfilePreviewImg");
+  if (previewImg) previewImg.src = getProfilePicUrl(currentUser);
+  renderPresetAvatarOptions();
+
   $("editProfileName").value = currentUser.name || "Student Name";
   $("editProfileUsername").value = currentUser.username || "Username";
   $("editProfileDivision").value = currentUser.division || "";
@@ -2586,6 +3105,49 @@ function closeEditProfileModal() {
 function bindEditProfileEvents() {
   $("closeEditProfile").addEventListener("click", closeEditProfileModal);
   editProfileModal.addEventListener("click", e => { if (e.target === editProfileModal) closeEditProfileModal(); });
+
+  const aiScanBtn = $("aiFaceScanBtn");
+  if (aiScanBtn) {
+    aiScanBtn.addEventListener("click", () => {
+      openFaceScanModal();
+    });
+  }
+
+  const picInput = $("editProfilePicInput");
+  if (picInput) {
+    picInput.addEventListener("change", e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 10 * 1024 * 1024) {
+        alert("Image size should be less than 10MB");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = evt => {
+        openCropModal(evt.target.result);
+        e.target.value = "";
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  const adjustCropBtn = $("adjustCropPhotoBtn");
+  if (adjustCropBtn) {
+    adjustCropBtn.addEventListener("click", () => {
+      const currentPic = pendingProfilePic || getProfilePicUrl(currentUser);
+      openCropModal(currentPic);
+    });
+  }
+
+  const removePicBtn = $("removeProfilePicBtn");
+  if (removePicBtn) {
+    removePicBtn.addEventListener("click", () => {
+      pendingProfilePic = "";
+      const previewImg = $("editProfilePreviewImg");
+      if (previewImg) previewImg.src = getProfilePicUrl({ name: currentUser ? currentUser.name : "S" });
+      renderPresetAvatarOptions();
+    });
+  }
 
   const yearSelect = $("editProfileCourseYear");
   if (yearSelect) {
@@ -2667,7 +3229,8 @@ function bindEditProfileEvents() {
           semester,
           division,
           languageChoice,
-          mathChoice
+          mathChoice,
+          profilePic: pendingProfilePic
         });
       } catch (err) {
         console.warn("Server update unavailable, updating locally:", err.message);
@@ -2682,13 +3245,15 @@ function bindEditProfileEvents() {
           semester,
           division,
           languageChoice,
-          mathChoice
+          mathChoice,
+          profilePic: pendingProfilePic
         };
       }
 
-      // Explicitly guarantee language & math choices on updated user object
+      // Explicitly guarantee language & math choices & profilePic on updated user object
       updated.languageChoice = languageChoice;
       updated.mathChoice = mathChoice;
+      updated.profilePic = pendingProfilePic;
 
       if (oldUsername.toLowerCase() !== username.toLowerCase()) {
         renameStudentAcademicData(oldUsername, username);
@@ -2703,7 +3268,7 @@ function bindEditProfileEvents() {
       sessionStorage.setItem("portalUser", JSON.stringify(currentUser));
 
       $("userName").textContent = currentUser.name;
-      $("userAvatar").textContent = currentUser.name.charAt(0).toUpperCase();
+      updateUserAvatarUI();
 
       setProfileStatusMessage("Profile updated successfully!", "success");
       $("editProfileMessage").textContent = "Profile updated successfully!";
@@ -3055,7 +3620,12 @@ function initAttendancePage() {
   const dateInput = $("attDateInput");
   if (dateInput) {
     dateInput.addEventListener("change", e => {
-      attendanceFilterDate = e.target.value || getTodayISODate();
+      let selectedDate = e.target.value;
+      const todayISO = getTodayISODate();
+      if (selectedDate && selectedDate > todayISO) {
+        selectedDate = todayISO;
+      }
+      attendanceFilterDate = selectedDate || todayISO;
       isAttendanceDetailsEntered = false;
       activeAttendanceMap = {};
       attendanceSaveSuccessMessage = "";
@@ -3067,6 +3637,10 @@ function initAttendancePage() {
   if (submitBtn) {
     submitBtn.addEventListener("click", () => {
       const err = $("attFilterErrorMsg");
+      const todayISO = getTodayISODate();
+      if (attendanceFilterDate > todayISO) {
+        attendanceFilterDate = todayISO;
+      }
       if (!attendanceFilterDivision || !attendanceFilterDate) {
         if (err) {
           err.textContent = "⚠️ Please select Division and Particular Date to view attendance.";
@@ -4338,9 +4912,14 @@ const pages = {
       return `<section class="panel profile">
         ${setupBanner}
         <div class="profile-head">
-          <div class="big-avatar">${currentUser.name.charAt(0).toUpperCase()}</div>
+          <div class="profile-avatar-container">
+            <img src="${getProfilePicUrl(currentUser)}" alt="${currentUser.name}" class="profile-picture-img">
+            <button type="button" class="avatar-edit-overlay-btn" title="Change Profile Picture" onclick="openEditProfileModal()">
+              <span>📷 Change</span>
+            </button>
+          </div>
           <div class="profile-main-info">
-            <h2>${currentUser.name}</h2>
+            <h2>${currentUser.name} <span class="role-badge-chip">🎓 Student</span></h2>
             <p>${subtitleText}</p>
           </div>
           <button id="openEditProfileBtn" class="primary-btn profile-edit-btn" type="button">
@@ -4421,6 +5000,10 @@ const pages = {
     }
     if (currentUser.role === "faculty") {
       const subjectObj = subjectById(currentUser.subject) || { name: currentUser.subject || "Subject", icon: "📘" };
+      const todayISO = getTodayISODate();
+      if (attendanceFilterDate > todayISO) {
+        attendanceFilterDate = todayISO;
+      }
       const displayDate = formatDateDDMMYY(attendanceFilterDate);
 
       const facultySem = getSemesterForSubject(currentUser.subject);
@@ -4537,7 +5120,7 @@ const pages = {
             <div class="filter-group">
               <label for="attDateInput">4. Particular Date (DD-MM-YY)</label>
               <div class="date-input-wrap">
-                <input type="date" id="attDateInput" value="${attendanceFilterDate}" class="filter-input-date">
+                <input type="date" id="attDateInput" max="${todayISO}" value="${attendanceFilterDate}" class="filter-input-date">
                 <span class="date-formatted-badge">📅 ${displayDate}</span>
               </div>
             </div>

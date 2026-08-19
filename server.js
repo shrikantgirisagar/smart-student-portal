@@ -298,7 +298,7 @@ app.put("/api/users/:role/:username", async (req, res) => {
   try {
     const { role, username } = req.params;
     const decodedUsername = normalizeUsername(decodeURIComponent(username));
-    const { name, newUsername, password, email, subject, department, division, semester, courseYear, course, languageChoice, mathChoice } = req.body || {};
+    const { name, newUsername, password, email, subject, department, division, semester, courseYear, course, languageChoice, mathChoice, profilePic } = req.body || {};
     const current = readDatabase();
     const user = findUser(current, role, decodedUsername);
     if (!user) return res.status(404).json({ success: false, message: "Account not found." });
@@ -331,6 +331,7 @@ app.put("/api/users/:role/:username", async (req, res) => {
       if (course !== undefined) user.course = String(course).trim();
       if (languageChoice !== undefined) user.languageChoice = String(languageChoice).trim();
       if (mathChoice !== undefined) user.mathChoice = String(mathChoice).trim();
+      if (profilePic !== undefined) user.profilePic = String(profilePic);
     }
     if (password) {
       if (String(password).length < 6) return res.status(400).json({ success: false, message: "Password must contain at least 6 characters." });
