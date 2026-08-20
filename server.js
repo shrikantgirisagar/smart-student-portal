@@ -1,4 +1,10 @@
 require("dotenv").config();
+const dns = require("dns");
+try {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+} catch (e) {
+  // fallback if custom dns restricted
+}
 
 const express = require("express");
 const cors = require("cors");
@@ -6,16 +12,24 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { promisify } = require("util");
+const mongoose = require("mongoose");
+
+// Mongoose Models
+const User = require("./models/User");
+const Notice = require("./models/Notice");
+const Attendance = require("./models/Attendance");
+const Mark = require("./models/Mark");
+const Assignment = require("./models/Assignment");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
+const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/smart_student_portal";
 const DB_FILE = path.join(__dirname, "data", "database.json");
 
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
 // Serve the portal from the same Node.js server so Live Server is not required.
-// Only the frontend files are exposed; the private data/ folder is never served.
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/index.html", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/style.css", (req, res) => res.sendFile(path.join(__dirname, "style.css")));
@@ -24,37 +38,13 @@ app.get("/script.js", (req, res) => res.sendFile(path.join(__dirname, "script.js
 
 const scryptAsync = promisify(crypto.scrypt);
 
-function ensureDatabase() {
-  const dir = path.dirname(DB_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify({ users: [] }, null, 2), "utf8");
-  }
-}
-
-function readDatabase() {
-  ensureDatabase();
-  try {
-    const parsed = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
-    if (!parsed || !Array.isArray(parsed.users)) return { users: [] };
-    return parsed;
-  } catch (error) {
-    console.error("Database read error:", error.message);
-    throw new Error("Database file is invalid. Fix data/database.json before starting.");
-  }
-}
-
-function writeDatabase(db) {
-  ensureDatabase();
-  const temp = `${DB_FILE}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(db, null, 2), "utf8");
-  fs.renameSync(temp, DB_FILE);
-}
-
 function sanitizeUser(user) {
   if (!user) return null;
-  const { passwordHash, ...safe } = user;
-  return safe;
+  const doc = typeof user.toPublicJSON === "function" ? user.toPublicJSON() : (user.toObject ? user.toObject() : { ...user });
+  delete doc.passwordHash;
+  delete doc.__v;
+  delete doc._id;
+  return doc;
 }
 
 function normalizeEmail(email) {
@@ -63,10 +53,6 @@ function normalizeEmail(email) {
 
 function normalizeUsername(username) {
   return String(username || "").trim();
-}
-
-function normalizeMobile(mobile) {
-  return String(mobile || "").replace(/\D/g, "");
 }
 
 function validRole(role) {
@@ -80,27 +66,6 @@ function validateUserFields({ name, username, email, role, subject }) {
   if (role !== "admin" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(email))) return "Enter a valid email address.";
   if (role === "faculty" && !subject) return "Please select a faculty subject.";
   return "";
-}
-
-function findUser(db, role, username) {
-  const u = normalizeUsername(username).toLowerCase();
-  return db.users.find(user => user.role === role && user.username.toLowerCase() === u) || null;
-}
-
-function findUserByEmail(db, role, email) {
-  const e = normalizeEmail(email);
-  return db.users.find(user => user.role === role && normalizeEmail(user.email) === e) || null;
-}
-
-function usernameTaken(db, username, exceptId = null) {
-  const u = normalizeUsername(username).toLowerCase();
-  return db.users.some(user => user.id !== exceptId && user.username.toLowerCase() === u);
-}
-
-function emailTaken(db, email, exceptId = null) {
-  const e = normalizeEmail(email);
-  if (!e) return false;
-  return db.users.some(user => user.id !== exceptId && normalizeEmail(user.email) === e);
 }
 
 function createId(role) {
@@ -133,52 +98,90 @@ async function verifyPassword(password, stored) {
   }
 }
 
-const db = readDatabase();
+// Connect to MongoDB & Seed Initial Accounts
+async function initDatabase() {
+  try {
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000
+    });
+    console.log("Connected to MongoDB successfully.");
 
-// Backfill hashes for the three starter accounts if the ZIP contains the original demo passwords.
-// These values are only used once to initialize the supplied database file.
-const STARTER_PASSWORDS = {
-  "admin:admin": "admin@123"
-};
+    // Seed default admin or migrate local json if user count is zero
+    const userCount = await User.countDocuments();
+    if (userCount === 0) {
+      console.log("No users found in MongoDB. Checking local database.json for migration...");
+      if (fs.existsSync(DB_FILE)) {
+        try {
+          const parsed = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+          const users = Array.isArray(parsed?.users) ? parsed.users : [];
+          if (users.length > 0) {
+            for (const u of users) {
+              await User.updateOne({ id: u.id }, { $set: u }, { upsert: true });
+            }
+            console.log(`Migrated ${users.length} users from data/database.json into MongoDB.`);
+          }
+        } catch (e) {
+          console.error("Auto-migration error:", e.message);
+        }
+      }
 
-(async () => {
-  let changed = false;
-  for (const user of db.users) {
-    if (user.role === "admin" && user.username === "admin") {
-      user.passwordHash = await hashPassword("admin@123");
-      user.updatedAt = new Date().toISOString();
-      changed = true;
-    } else if (!user.passwordHash) {
-      const starter = STARTER_PASSWORDS[`${user.role}:${user.username}`];
-      if (starter) {
-        user.passwordHash = await hashPassword(starter);
-        user.updatedAt = new Date().toISOString();
-        changed = true;
+      // Ensure admin account exists
+      const adminExists = await User.findOne({ role: "admin", username: "admin" });
+      if (!adminExists) {
+        const adminPasswordHash = await hashPassword("admin@123");
+        await User.create({
+          id: "admin-001",
+          role: "admin",
+          name: "Administrator",
+          username: "admin",
+          email: "admin@smartportal.edu",
+          passwordHash: adminPasswordHash
+        });
+        console.log("Default admin account created in MongoDB (admin / admin@123).");
       }
     }
+  } catch (error) {
+    console.error("MongoDB Connection Error:", error.message);
+    console.log("Note: Please make sure MongoDB is running locally or set MONGODB_URI in your .env file.");
   }
-  if (changed) writeDatabase(db);
-})().catch(error => console.error("Starter database setup error:", error.message));
+}
 
+initDatabase();
 
+// --- API Endpoints ---
 
 app.get("/api/status", (req, res) => {
-  res.json({ success: true, message: "Smart Student Portal backend is running." });
+  const states = ["disconnected", "connected", "connecting", "disconnecting"];
+  const dbState = states[mongoose.connection.readyState] || "unknown";
+  res.json({
+    success: true,
+    message: "Smart Student Portal backend is running.",
+    database: "MongoDB",
+    databaseState: dbState
+  });
 });
 
 app.get("/api/health", (req, res) => {
+  const states = ["disconnected", "connected", "connecting", "disconnecting"];
   res.json({
     success: true,
-    databaseFile: "data/database.json"
+    databaseMode: "MongoDB",
+    databaseState: states[mongoose.connection.readyState] || "unknown",
+    connectionUri: MONGODB_URI.replace(/\/\/([^:]+):([^@]+)@/, "//***:***@")
   });
 });
 
-app.get("/api/users/public", (req, res) => {
-  const current = readDatabase();
-  res.json({
-    success: true,
-    users: current.users.map(sanitizeUser)
-  });
+app.get("/api/users/public", async (req, res) => {
+  try {
+    const users = await User.find({});
+    res.json({
+      success: true,
+      users: users.map(sanitizeUser)
+    });
+  } catch (error) {
+    console.error("Get users error:", error);
+    res.status(500).json({ success: false, message: "Unable to fetch users." });
+  }
 });
 
 app.post("/api/users/migrate", async (req, res) => {
@@ -188,7 +191,6 @@ app.post("/api/users/migrate", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid migration data." });
     }
 
-    const current = readDatabase();
     let added = 0;
     let updated = 0;
 
@@ -197,7 +199,8 @@ app.post("/api/users/migrate", async (req, res) => {
       for (const item of list) {
         const username = normalizeUsername(item.username);
         if (!username) continue;
-        const existing = findUser(current, role, username);
+
+        const existing = await User.findOne({ role, username: new RegExp(`^${username}$`, "i") });
         if (existing) {
           if (item.email) existing.email = normalizeEmail(item.email);
           if (item.name) existing.name = String(item.name).trim();
@@ -205,19 +208,18 @@ app.post("/api/users/migrate", async (req, res) => {
           if (item.department !== undefined) existing.department = String(item.department).trim();
           if (!existing.passwordHash && item.password) existing.passwordHash = await hashPassword(item.password);
           if (role === "student") {
-            if (item.division !== undefined && item.division !== "") existing.division = String(item.division).trim();
-            if (item.semester !== undefined && item.semester !== "") existing.semester = String(item.semester).trim();
-            if (item.courseYear !== undefined && item.courseYear !== "") existing.courseYear = String(item.courseYear).trim();
-            if (item.course !== undefined && item.course !== "") existing.course = String(item.course).trim();
-            if (item.languageChoice !== undefined && item.languageChoice !== "") existing.languageChoice = String(item.languageChoice).trim();
-            if (item.mathChoice !== undefined && item.mathChoice !== "") existing.mathChoice = String(item.mathChoice).trim();
+            if (item.division) existing.division = String(item.division).trim();
+            if (item.semester) existing.semester = String(item.semester).trim();
+            if (item.courseYear) existing.courseYear = String(item.courseYear).trim();
+            if (item.course) existing.course = String(item.course).trim();
+            if (item.languageChoice) existing.languageChoice = String(item.languageChoice).trim();
+            if (item.mathChoice) existing.mathChoice = String(item.mathChoice).trim();
           }
-          existing.updatedAt = new Date().toISOString();
+          await existing.save();
           updated++;
           continue;
         }
 
-        const now = new Date().toISOString();
         const newUser = {
           id: createId(role),
           role,
@@ -226,9 +228,7 @@ app.post("/api/users/migrate", async (req, res) => {
           email: normalizeEmail(item.email),
           subject: role === "faculty" ? String(item.subject || "") : "",
           department: role === "faculty" ? String(item.department || "Department of Computer Science & Applications") : "",
-          passwordHash: item.password ? await hashPassword(item.password) : "",
-          createdAt: now,
-          updatedAt: now
+          passwordHash: item.password ? await hashPassword(item.password) : ""
         };
         if (role === "student") {
           newUser.division = String(item.division || "").trim();
@@ -238,13 +238,13 @@ app.post("/api/users/migrate", async (req, res) => {
           newUser.languageChoice = String(item.languageChoice || "").trim();
           newUser.mathChoice = String(item.mathChoice || "").trim();
         }
-        current.users.push(newUser);
+        await User.create(newUser);
         added++;
       }
     }
 
-    writeDatabase(current);
-    res.json({ success: true, added, updated, users: current.users.map(sanitizeUser) });
+    const allUsers = await User.find({});
+    res.json({ success: true, added, updated, users: allUsers.map(sanitizeUser) });
   } catch (error) {
     console.error("Migration error:", error);
     res.status(500).json({ success: false, message: "Unable to migrate users." });
@@ -258,12 +258,15 @@ app.post("/api/users", async (req, res) => {
     if (validation) return res.status(400).json({ success: false, message: validation });
     if (!password || String(password).length < 6) return res.status(400).json({ success: false, message: "Password must contain at least 6 characters." });
 
-    const current = readDatabase();
-    if (usernameTaken(current, username)) return res.status(409).json({ success: false, message: "That username is already in use." });
-    if (emailTaken(current, email)) return res.status(409).json({ success: false, message: "That email address is already in use." });
+    const existingUsername = await User.findOne({ username: new RegExp(`^${normalizeUsername(username)}$`, "i") });
+    if (existingUsername) return res.status(409).json({ success: false, message: "That username is already in use." });
 
-    const now = new Date().toISOString();
-    const user = {
+    if (email && normalizeEmail(email)) {
+      const existingEmail = await User.findOne({ email: normalizeEmail(email) });
+      if (existingEmail) return res.status(409).json({ success: false, message: "That email address is already in use." });
+    }
+
+    const userObj = {
       id: createId(role),
       role,
       name: String(name).trim(),
@@ -271,23 +274,20 @@ app.post("/api/users", async (req, res) => {
       email: normalizeEmail(email),
       subject: role === "faculty" ? String(subject || "") : "",
       department: role === "faculty" ? String(department || "Department of Computer Science & Applications").trim() : "",
-      passwordHash: await hashPassword(password),
-      createdAt: now,
-      updatedAt: now
+      passwordHash: await hashPassword(password)
     };
 
     if (role === "student") {
-      user.division = String(division || "Div A").trim();
-      user.semester = String(semester || "1st Semester").trim();
-      user.courseYear = String(courseYear || "1st Year").trim();
-      user.course = String(course || "Bachelor of Computer Applications (BCA)").trim();
-      user.languageChoice = String(languageChoice || "Kannada").trim();
-      user.mathChoice = String(mathChoice || "Mathematics").trim();
+      userObj.division = String(division || "Div A").trim();
+      userObj.semester = String(semester || "1st Semester").trim();
+      userObj.courseYear = String(courseYear || "1st Year").trim();
+      userObj.course = String(course || "Bachelor of Computer Applications (BCA)").trim();
+      userObj.languageChoice = String(languageChoice || "Kannada").trim();
+      userObj.mathChoice = String(mathChoice || "Mathematics").trim();
     }
 
-    current.users.push(user);
-    writeDatabase(current);
-    res.status(201).json({ success: true, user: sanitizeUser(user) });
+    const createdUser = await User.create(userObj);
+    res.status(201).json({ success: true, user: sanitizeUser(createdUser) });
   } catch (error) {
     console.error("Create user error:", error);
     res.status(500).json({ success: false, message: "Unable to save the user." });
@@ -299,8 +299,8 @@ app.put("/api/users/:role/:username", async (req, res) => {
     const { role, username } = req.params;
     const decodedUsername = normalizeUsername(decodeURIComponent(username));
     const { name, newUsername, password, email, subject, department, division, semester, courseYear, course, languageChoice, mathChoice, profilePic } = req.body || {};
-    const current = readDatabase();
-    const user = findUser(current, role, decodedUsername);
+
+    const user = await User.findOne({ role, username: new RegExp(`^${decodedUsername}$`, "i") });
     if (!user) return res.status(404).json({ success: false, message: "Account not found." });
 
     const nextUsername = normalizeUsername(newUsername || user.username);
@@ -314,8 +314,15 @@ app.put("/api/users/:role/:username", async (req, res) => {
     });
     if (validation) return res.status(400).json({ success: false, message: validation });
 
-    if (usernameTaken(current, nextUsername, user.id)) return res.status(409).json({ success: false, message: "That username is already in use." });
-    if (emailTaken(current, nextEmail, user.id)) return res.status(409).json({ success: false, message: "That email address is already in use." });
+    if (nextUsername.toLowerCase() !== user.username.toLowerCase()) {
+      const takenUser = await User.findOne({ username: new RegExp(`^${nextUsername}$`, "i"), id: { $ne: user.id } });
+      if (takenUser) return res.status(409).json({ success: false, message: "That username is already in use." });
+    }
+
+    if (nextEmail && nextEmail !== user.email) {
+      const takenEmail = await User.findOne({ email: nextEmail, id: { $ne: user.id } });
+      if (takenEmail) return res.status(409).json({ success: false, message: "That email address is already in use." });
+    }
 
     user.name = String(name || user.name).trim();
     user.username = nextUsername;
@@ -337,9 +344,8 @@ app.put("/api/users/:role/:username", async (req, res) => {
       if (String(password).length < 6) return res.status(400).json({ success: false, message: "Password must contain at least 6 characters." });
       user.passwordHash = await hashPassword(password);
     }
-    user.updatedAt = new Date().toISOString();
 
-    writeDatabase(current);
+    await user.save();
     res.json({ success: true, user: sanitizeUser(user) });
   } catch (error) {
     console.error("Update user error:", error);
@@ -347,7 +353,7 @@ app.put("/api/users/:role/:username", async (req, res) => {
   }
 });
 
-app.delete("/api/users/:role/:username", (req, res) => {
+app.delete("/api/users/:role/:username", async (req, res) => {
   try {
     const { role, username } = req.params;
     if (role === "admin") return res.status(403).json({ success: false, message: "Admin accounts cannot be deleted here." });
@@ -355,18 +361,15 @@ app.delete("/api/users/:role/:username", (req, res) => {
     const targetRole = String(role || "").trim().toLowerCase();
     const targetUsername = normalizeUsername(decodeURIComponent(username));
 
-    const current = readDatabase();
-    const before = current.users.length;
-    current.users = current.users.filter(user => {
-      const matchRole = user.role.toLowerCase() === targetRole;
-      const matchUser = normalizeUsername(user.username) === targetUsername;
-      return !(matchRole && matchUser);
+    const result = await User.deleteOne({
+      role: targetRole,
+      username: new RegExp(`^${targetUsername}$`, "i")
     });
 
-    if (current.users.length === before) return res.status(404).json({ success: false, message: "Account not found." });
+    if (result.deletedCount === 0) return res.status(404).json({ success: false, message: "Account not found." });
 
-    writeDatabase(current);
-    res.json({ success: true, message: "Account and details removed successfully.", remaining: current.users.length });
+    const remaining = await User.countDocuments();
+    res.json({ success: true, message: "Account and details removed successfully.", remaining });
   } catch (error) {
     console.error("Delete user error:", error);
     res.status(500).json({ success: false, message: "Unable to delete the user." });
@@ -378,8 +381,11 @@ app.post("/api/auth/login", async (req, res) => {
     const { role, username, password } = req.body || {};
     if (!validRole(role) || !username || !password) return res.status(400).json({ success: false, message: "Role, username and password are required." });
 
-    const current = readDatabase();
-    const user = findUser(current, role, username);
+    const user = await User.findOne({
+      role,
+      username: new RegExp(`^${normalizeUsername(username)}$`, "i")
+    });
+
     if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
       return res.status(401).json({ success: false, message: "Invalid username or password." });
     }
@@ -393,5 +399,5 @@ app.post("/api/auth/login", async (req, res) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Smart Student Portal backend running on port ${PORT}`);
-  console.log(`Database: ${DB_FILE}`);
+  console.log(`Database Mode: MongoDB (${MONGODB_URI})`);
 });
