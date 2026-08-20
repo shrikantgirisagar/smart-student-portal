@@ -4427,3 +4427,32 @@ td small {
   transform: translateY(-1px);
   box-shadow: 0 6px 18px rgba(79, 70, 229, 0.45);
 }
+
+/* Student Attendance Circle Badge */
+.att-circle-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 14px;
+  margin: 0 auto;
+  background: transparent;
+  color: #1e293b;
+  box-shadow: none;
+  transition: all 0.2s ease;
+}
+
+.att-circle-badge.good {
+  background: transparent;
+  border: 2.5px solid #22c55e;
+  color: #1e293b;
+}
+
+.att-circle-badge.warn {
+  background: transparent;
+  border: 2.5px solid #ef4444;
+  color: #1e293b;
+}

@@ -1,10 +1,4 @@
 require("dotenv").config();
-const dns = require("dns");
-try {
-  dns.setServers(["8.8.8.8", "1.1.1.1"]);
-} catch (e) {
-  // fallback if custom dns restricted
-}
 
 const express = require("express");
 const cors = require("cors");
@@ -148,6 +142,23 @@ async function initDatabase() {
 initDatabase();
 
 // --- API Endpoints ---
+
+app.use("/api", async (req, res, next) => {
+  if (req.path === "/status" || req.path === "/health") return next();
+  if (mongoose.connection.readyState !== 1) {
+    try {
+      console.log("Database disconnected. Attempting to reconnect to MongoDB...");
+      await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
+      console.log("Reconnected to MongoDB successfully.");
+    } catch (e) {
+      return res.status(503).json({
+        success: false,
+        message: "Database connection error. Please check your MongoDB status or add your IP address to MongoDB Atlas Network Access whitelist."
+      });
+    }
+  }
+  next();
+});
 
 app.get("/api/status", (req, res) => {
   const states = ["disconnected", "connected", "connecting", "disconnecting"];

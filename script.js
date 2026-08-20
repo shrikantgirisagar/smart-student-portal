@@ -807,6 +807,36 @@ function getStudentRecord(username) {
   return ACADEMIC.students[username] || { attendance: {}, marks: {}, assignments: [] };
 }
 
+function getSubjectClassesSummary(username, subjectId) {
+  const dailyLogs = ACADEMIC.dailyAttendance || [];
+  const subjectLogs = dailyLogs.filter(log => log.subject === subjectId);
+
+  let classesTaken = 0;
+  let classesAttended = 0;
+
+  subjectLogs.forEach(log => {
+    if (log.records && typeof log.records[username] === "string") {
+      classesTaken++;
+      if (log.records[username] === "P") {
+        classesAttended++;
+      }
+    }
+  });
+
+  const record = getStudentRecord(username);
+  let overallPct = 0;
+
+  if (classesTaken > 0) {
+    overallPct = Math.round((classesAttended / classesTaken) * 100);
+  } else if (record && typeof record.attendance[subjectId] === "number") {
+    overallPct = record.attendance[subjectId];
+    classesTaken = 20;
+    classesAttended = Math.round((overallPct / 100) * 20);
+  }
+
+  return { classesTaken, classesAttended, overallPct };
+}
+
 function ensureStudentRecord(username) {
   if (!ACADEMIC.students[username]) {
     ACADEMIC.students[username] = { attendance: {}, marks: {}, assignments: [] };
@@ -5340,19 +5370,26 @@ const pages = {
             <thead>
               <tr>
                 <th>Subject</th>
-                <th>Attendance</th>
-                <th>Status</th>
+                <th style="text-align:center;">No. Of Classes Taken</th>
+                <th style="text-align:center;">No. of Classes Attended</th>
+                <th style="text-align:center;">Overall Attendance (%)</th>
               </tr>
             </thead>
             <tbody>
               ${ids.map(id => {
       const s = subjectById(id);
-      const v = typeof record.attendance[id] === 'number' ? record.attendance[id] : 0;
+      const stats = getSubjectClassesSummary(currentUser.username, id);
+      const isGood = stats.overallPct >= 75;
       return `
                   <tr>
                     <td>${s.icon ? s.icon + ' ' : ''}<b>${s.name}</b></td>
-                    <td><div class="progress"><span style="width:${v}%"></span></div><b>${v}%</b></td>
-                    <td><span class="status ${v >= 75 ? "good" : "warn"}">${v >= 75 ? "Good" : "Needs Attention"}</span></td>
+                    <td style="text-align:center; font-weight:700; color:#334155; font-size:15px;">${stats.classesTaken}</td>
+                    <td style="text-align:center; font-weight:700; color:#334155; font-size:15px;">${stats.classesAttended}</td>
+                    <td style="text-align:center; vertical-align:middle;">
+                      <div class="att-circle-badge ${isGood ? 'good' : 'warn'}">
+                        ${stats.overallPct}%
+                      </div>
+                    </td>
                   </tr>
                 `;
     }).join("")}
