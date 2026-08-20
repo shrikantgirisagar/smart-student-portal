@@ -33,7 +33,6 @@ app.use(express.json({ limit: "50mb" }));
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/index.html", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/style.css", (req, res) => res.sendFile(path.join(__dirname, "style.css")));
-app.get("/database.js", (req, res) => res.sendFile(path.join(__dirname, "database.js")));
 app.get("/script.js", (req, res) => res.sendFile(path.join(__dirname, "script.js")));
 
 const scryptAsync = promisify(crypto.scrypt);
