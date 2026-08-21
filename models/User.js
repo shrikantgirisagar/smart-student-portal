@@ -79,6 +79,10 @@ const userSchema = new mongoose.Schema(
     profilePic: {
       type: String,
       default: ""
+    },
+    pushSubscription: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null
     }
   },
   {

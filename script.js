@@ -790,6 +790,9 @@ function saveAcademicData() {
   window.dispatchEvent(new CustomEvent("academicDataUpdated"));
   updateNoticeBadges();
   updateNotesBadges();
+  if (typeof syncAcademicDataToBackend === "function") {
+    syncAcademicDataToBackend();
+  }
 }
 
 function renameStudentAcademicData(oldUsername, newUsername) {
@@ -2963,11 +2966,9 @@ function updateNotesBadges() {
 }
 
 function buildNav() {
-  const items = currentUser.role === "student"
+  const items = (currentUser.role === "student" || currentUser.role === "faculty")
     ? [["dashboard", "🏠", "Dashboard"], ["profile", "👤", "Profile"], ["attendance", "📊", "Attendance"], ["marks", "📈", "Marks"], ["assignments", "📝", "Assignments"], ["notes", "📚", "Notes"], ["timetable", "🗓️", "Timetable"], ["notices", "📢", "Notices"]]
-    : currentUser.role === "faculty"
-      ? [["dashboard", "🏠", "Dashboard"], ["attendance", "📊", "Attendance"], ["marks", "📈", "Marks"], ["assignments", "📝", "Assignments"], ["notes", "📚", "Notes"], ["timetable", "🗓️", "Timetable"], ["notices", "📢", "Notices"]]
-      : [["dashboard", "🏠", "Dashboard"], ["students", "👥", "Students"], ["faculty", "🧑‍🏫", "Faculty"], ["timetable", "🗓️", "Timetable"], ["notices", "📢", "Notices"]];
+    : [["dashboard", "🏠", "Dashboard"], ["students", "👥", "Students"], ["faculty", "🧑‍🏫", "Faculty"], ["timetable", "🗓️", "Timetable"], ["notices", "📢", "Notices"]];
 
   const unreadNoticeCount = getUnreadNoticeCount();
   const unreadNotesCount = getUnreadNotesCount();
@@ -3463,18 +3464,7 @@ function syncAssignmentsForStudents() {
     });
   });
 
-  const initialCount = ACADEMIC.assignments.length;
-  ACADEMIC.assignments = ACADEMIC.assignments.filter(a => {
-    const targetDiv = a.targetDivision || "All Divisions";
-    if (targetDiv !== "All Divisions") {
-      const st = (USERS.student || []).find(u => String(u.username).toLowerCase() === String(a.student).toLowerCase());
-      const stDiv = st ? (st.division || "Div A") : "Div A";
-      if (stDiv !== targetDiv) return false;
-    }
-    return true;
-  });
-
-  if (added || ACADEMIC.assignments.length !== initialCount) {
+  if (added) {
     saveAcademicData();
   }
 }
@@ -3496,13 +3486,13 @@ function getStudentAssignments(username) {
 
 function getSubjectAssignments(subject) {
   syncAssignmentsForStudents();
+  if (!ACADEMIC || !Array.isArray(ACADEMIC.assignments)) return [];
+  const normSub = String(subject || "").trim().toLowerCase();
+
   return ACADEMIC.assignments.filter(a => {
-    if (a.subject !== subject) return false;
-    const targetDiv = a.targetDivision || "All Divisions";
-    if (targetDiv !== "All Divisions") {
-      const st = (USERS.student || []).find(u => String(u.username).toLowerCase() === String(a.student).toLowerCase());
-      const stDiv = st ? (st.division || "Div A") : "Div A";
-      if (stDiv !== targetDiv) return false;
+    if (normSub) {
+      const aSub = String(a.subject || "").trim().toLowerCase();
+      if (aSub !== normSub) return false;
     }
     return true;
   });
@@ -3823,15 +3813,20 @@ function initAttendancePage() {
     });
   });
 
-  // Delete past log button
+  // Delete past log button (Instant 0ms DOM removal)
   document.querySelectorAll(".delete-log-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", (e) => {
+      if (e) e.preventDefault();
       const dDate = btn.dataset.date;
       const dDiv = btn.dataset.div;
       const dSem = btn.dataset.sem;
       const dYear = btn.dataset.year;
 
       if (confirm("Are you sure you want to delete this attendance record?")) {
+        // INSTANT 0ms DOM REMOVAL
+        const logItem = btn.closest(".history-item, tr, .card, .att-log-card");
+        if (logItem) logItem.remove();
+
         ACADEMIC.dailyAttendance = (ACADEMIC.dailyAttendance || []).filter(entry =>
           !(entry.subject === currentUser.subject &&
             entry.isoDate === dDate &&
@@ -3841,21 +3836,26 @@ function initAttendancePage() {
         );
         updateStudentOverallAttendance(currentUser.subject);
         saveAcademicData();
-        navigate("attendance");
       }
     });
   });
 
-  // Clear all past logs button
+  // Clear all past logs button (Instant 0ms DOM clear)
   const deleteAllBtn = $("deleteAllLogsBtn");
   if (deleteAllBtn) {
-    deleteAllBtn.addEventListener("click", () => {
+    deleteAllBtn.addEventListener("click", (e) => {
+      if (e) e.preventDefault();
       const subjectObj = subjectById(currentUser ? currentUser.subject : "") || { name: "this subject" };
       if (confirm(`Are you sure you want to delete ALL stored attendance records for ${subjectObj.name}?`)) {
+        // INSTANT 0ms DOM CLEAR
+        const historyWrap = document.querySelector(".attendance-history-list, .att-history-wrap");
+        if (historyWrap) {
+          historyWrap.innerHTML = `<div class="empty-state" style="padding:20px; text-align:center; color:#64748b;">🗑️ All stored attendance records cleared.</div>`;
+        }
+
         ACADEMIC.dailyAttendance = (ACADEMIC.dailyAttendance || []).filter(entry => entry.subject !== currentUser.subject);
         updateStudentOverallAttendance(currentUser.subject);
         saveAcademicData();
-        navigate("attendance");
       }
     });
   }
@@ -4010,9 +4010,10 @@ function initMarksPage() {
       if (msg) {
         msg.textContent = "✅ All student marks saved successfully!";
         msg.className = "message success";
+        setTimeout(() => {
+          if (msg) msg.textContent = "";
+        }, 3000);
       }
-
-      setTimeout(() => navigate("marks"), 800);
     });
   }
 }
@@ -4035,21 +4036,29 @@ function initAssignmentsPage() {
           return;
         }
         const targetDiv = $("assignmentTargetDivision") ? $("assignmentTargetDivision").value : "All Divisions";
-        let targetStudents = getStudentsForSubject(currentUser.subject);
+        let targetStudents = getStudentsForSubject(currentUser ? currentUser.subject : "");
         if (targetDiv && targetDiv !== "All Divisions") {
-          targetStudents = targetStudents.filter(s => (s.division || "Div A") === targetDiv);
+          const divStudents = targetStudents.filter(s => (s.division || "Div A") === targetDiv);
+          if (divStudents.length) targetStudents = divStudents;
         }
 
         if (!targetStudents.length) {
-          $("assignmentMessage").textContent = `No students found in ${targetDiv} for this subject.`;
-          $("assignmentMessage").className = "message error";
-          return;
+          targetStudents = (USERS.student || []).filter(s => !targetDiv || targetDiv === "All Divisions" || (s.division || "Div A") === targetDiv);
+        }
+
+        if (!targetStudents.length && (USERS.student || []).length) {
+          targetStudents = USERS.student;
+        }
+
+        if (!targetStudents.length) {
+          targetStudents = [{ username: "all", name: "All Students", division: targetDiv || "Div A" }];
         }
 
         const saveAndNavigate = (fileName, fileData) => {
           const assignId = "assign_" + Date.now();
           const todayISO = getTodayISODate();
           if (!Array.isArray(ACADEMIC.deletedAssignments)) ACADEMIC.deletedAssignments = [];
+
           targetStudents.forEach(s => {
             const deleteKey = `${String(s.username).toLowerCase()}___${currentUser.subject}___${title}___${due}`;
             ACADEMIC.deletedAssignments = ACADEMIC.deletedAssignments.filter(k => k !== deleteKey);
@@ -4130,43 +4139,7 @@ function initAssignmentsPage() {
       }
     }
 
-    document.querySelectorAll(".btn-faculty-set-status").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const idx = parseInt(btn.dataset.assignIndex, 10);
-        const newStatus = btn.dataset.status;
-        const subjectList = getSubjectAssignments(currentUser.subject);
-
-        const assign = subjectList[idx];
-        if (assign) {
-          assign.status = newStatus;
-          assign.submittedDate = newStatus === "Submitted" ? (assign.submittedDate || getTodayISODate()) : "";
-          saveAcademicData();
-          navigate("assignments");
-        }
-      });
-    });
-
-    document.querySelectorAll(".btn-delete-assignment").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const idx = parseInt(btn.dataset.assignIndex, 10);
-        const subjectList = getSubjectAssignments(currentUser.subject);
-        const assign = subjectList[idx];
-        if (assign) {
-          const st = (USERS.student || []).find(u => u.username === assign.student);
-          const studentName = st ? st.name : assign.student;
-          if (confirm(`Delete assignment "${assign.title}" for ${studentName}?`)) {
-            if (!Array.isArray(ACADEMIC.deletedAssignments)) ACADEMIC.deletedAssignments = [];
-            const deleteKey = `${String(assign.student).toLowerCase()}___${assign.subject}___${assign.title}___${assign.due}`;
-            if (!ACADEMIC.deletedAssignments.includes(deleteKey)) {
-              ACADEMIC.deletedAssignments.push(deleteKey);
-            }
-            ACADEMIC.assignments = ACADEMIC.assignments.filter(a => a !== assign);
-            saveAcademicData();
-            navigate("assignments");
-          }
-        }
-      });
-    });
+    // Status, Delete, and Clear All actions are handled seamlessly with instant 0ms DOM updates by the global delegated click listener.
 
     const divFilter = $("assignmentDivisionFilter");
     if (divFilter) {
@@ -4178,10 +4151,10 @@ function initAssignmentsPage() {
 
     const clearAllBtn = $("btnClearAllAssignments");
     if (clearAllBtn) {
-      clearAllBtn.addEventListener("click", () => {
-        const subjectObj = subjectById(currentUser.subject) || { name: currentUser.subject || "Subject" };
-        const subjectList = getSubjectAssignments(currentUser.subject);
-        if (!subjectList.length) return;
+      clearAllBtn.addEventListener("click", (e) => {
+        if (e) e.preventDefault();
+        const subjectObj = subjectById(currentUser ? currentUser.subject : "") || { name: (currentUser ? currentUser.subject : "") || "Subject" };
+        const facSub = currentUser ? String(currentUser.subject || "").trim().toLowerCase() : "";
 
         let scopeText = `ALL assignment status records for ${subjectObj.name}`;
         if (assignmentFilterDivision && assignmentFilterDivision !== "All Divisions") {
@@ -4190,29 +4163,34 @@ function initAssignmentsPage() {
 
         if (confirm(`Are you sure you want to clear ${scopeText}? This action cannot be undone.`)) {
           if (!Array.isArray(ACADEMIC.deletedAssignments)) ACADEMIC.deletedAssignments = [];
-          if (assignmentFilterDivision && assignmentFilterDivision !== "All Divisions") {
-            ACADEMIC.assignments = ACADEMIC.assignments.filter(a => {
-              if (a.subject !== currentUser.subject) return true;
-              const st = (USERS.student || []).find(u => u.username === a.student);
-              const div = st ? (st.division || "Div A") : "Div A";
-              if (div === assignmentFilterDivision) {
-                const deleteKey = `${String(a.student).toLowerCase()}___${a.subject}___${a.title}___${a.due}`;
-                if (!ACADEMIC.deletedAssignments.includes(deleteKey)) {
-                  ACADEMIC.deletedAssignments.push(deleteKey);
-                }
-                return false;
-              }
-              return true;
-            });
-          } else {
-            ACADEMIC.assignments.filter(a => a.subject === currentUser.subject).forEach(a => {
+
+          ACADEMIC.assignments.forEach(a => {
+            const matchSub = !facSub || String(a.subject || "").trim().toLowerCase() === facSub;
+            if (matchSub) {
               const deleteKey = `${String(a.student).toLowerCase()}___${a.subject}___${a.title}___${a.due}`;
               if (!ACADEMIC.deletedAssignments.includes(deleteKey)) {
                 ACADEMIC.deletedAssignments.push(deleteKey);
               }
+            }
+          });
+
+          if (assignmentFilterDivision && assignmentFilterDivision !== "All Divisions") {
+            ACADEMIC.assignments = ACADEMIC.assignments.filter(a => {
+              const matchSub = !facSub || String(a.subject || "").trim().toLowerCase() === facSub;
+              if (matchSub) {
+                const st = (USERS.student || []).find(u => u.username === a.student);
+                const div = st ? (st.division || "Div A") : "Div A";
+                return div !== assignmentFilterDivision;
+              }
+              return true;
             });
-            ACADEMIC.assignments = ACADEMIC.assignments.filter(a => a.subject !== currentUser.subject);
+          } else {
+            ACADEMIC.assignments = ACADEMIC.assignments.filter(a => {
+              const matchSub = facSub && String(a.subject || "").trim().toLowerCase() === facSub;
+              return !matchSub;
+            });
           }
+
           saveAcademicData();
           navigate("assignments");
         }
@@ -4277,13 +4255,18 @@ function initNotesPage() {
     }
 
     document.querySelectorAll(".btn-delete-note").forEach(btn => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", (e) => {
+        if (e) e.preventDefault();
         const noteId = btn.dataset.noteId;
         if (noteId && Array.isArray(ACADEMIC.notes)) {
           if (confirm("Are you sure you want to delete this study note?")) {
+            // INSTANT 0ms DOM REMOVAL
+            const card = btn.closest(".note-card-item, .card, .panel, tr");
+            if (card) card.remove();
+
             ACADEMIC.notes = ACADEMIC.notes.filter(n => n.id !== noteId);
             saveAcademicData();
-            navigate("notes");
+            updateNotesBadges();
           }
         }
       });
@@ -4373,18 +4356,24 @@ function initNoticesPage() {
     }
 
     document.querySelectorAll("[data-delete-notice-index]").forEach(btn => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", (e) => {
+        if (e) e.preventDefault();
         const idx = parseInt(btn.dataset.deleteNoticeIndex, 10);
         if (!isNaN(idx) && idx >= 0) {
           const sortedList = getNoticeList();
           const targetNotice = sortedList[idx];
           if (targetNotice && canDeleteNotice(targetNotice, currentUser)) {
-            const originalIdx = ACADEMIC.notices.indexOf(targetNotice);
-            if (originalIdx !== -1) {
-              ACADEMIC.notices.splice(originalIdx, 1);
-              saveAcademicData();
-              updateNoticeBadges();
-              navigate("notices");
+            if (confirm(`Delete notice "${targetNotice.title}"?`)) {
+              // INSTANT 0ms DOM REMOVAL
+              const card = btn.closest(".notice-card, .card, tr, .notice-item");
+              if (card) card.remove();
+
+              const originalIdx = ACADEMIC.notices.indexOf(targetNotice);
+              if (originalIdx !== -1) {
+                ACADEMIC.notices.splice(originalIdx, 1);
+                saveAcademicData();
+                updateNoticeBadges();
+              }
             }
           }
         }
@@ -4417,11 +4406,14 @@ function initAdminUserManagement(role = "student") {
 
       if (confirm(`Are you sure you want to remove ${role === "student" ? "student" : "faculty"} "${name}"?`)) {
         btn.disabled = true;
+        // INSTANT 0ms DOM ROW REMOVAL
+        const userRow = btn.closest("tr, [data-user-row], .user-card, .card");
+        if (userRow) userRow.remove();
+
         try {
           const removed = await removeUserAccount(userRole, username);
           if (removed) {
             setAdminNotice(`${role === "student" ? "Student" : "Faculty"} "${name}" was removed successfully.`, "success");
-            navigate(role === "student" ? "students" : "faculty");
           }
         } catch (err) {
           alert(err.message || "Failed to remove user account.");
@@ -5004,6 +4996,25 @@ const pages = {
           <div><small>Email Address</small><b>${email}</b></div>
           <div><small>Account Role</small><b>Faculty</b></div>
           <div><small>Assigned Subject</small><b>${subjectObj ? subjectObj.name : "N/A"}</b></div>
+        </div>
+        <div class="profile-subhead" style="margin-top: 24px;">
+          <h3>⏰ 15-Minute Class Warning Push Notifications</h3>
+        </div>
+        <div class="info-grid profile-info-grid" style="grid-template-columns: 1fr; gap: 16px; background: rgba(99, 102, 241, 0.06); padding: 20px; border-radius: 12px; border: 1px solid rgba(99, 102, 241, 0.18);">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+            <div style="flex: 1; min-width: 250px;">
+              <b style="font-size: 15px; color: #1e293b; display: block; margin-bottom: 4px;">Automatic Mobile & Browser Warnings</b>
+              <small style="color: #64748b; font-size: 13px; line-height: 1.5; display: block;">Receive push alerts on your mobile phone or browser <b>15 minutes before</b> your class starts showing semester, division, and subject details.</small>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button type="button" class="primary-btn" onclick="subscribeFacultyPushNotifications()" style="padding: 10px 18px; font-size: 13px;">
+                <span>🔔 Enable 15-Min Class Warnings</span>
+              </button>
+              <button type="button" class="secondary-btn" onclick="triggerTestPushNotification()" style="padding: 10px 18px; font-size: 13px; background: #e2e8f0; color: #334155; border: 1px solid #cbd5e1;">
+                <span>🧪 Test Notification</span>
+              </button>
+            </div>
+          </div>
         </div>
       </section>`;
     }
@@ -5681,6 +5692,8 @@ const pages = {
       let list = subjectAssignments;
       if (assignmentFilterDivision && assignmentFilterDivision !== "All Divisions") {
         list = list.filter(a => {
+          const aDiv = a.targetDivision || "All Divisions";
+          if (aDiv === assignmentFilterDivision || aDiv === "All Divisions") return true;
           const st = (USERS.student || []).find(u => u.username === a.student);
           const div = st ? (st.division || "Div A") : "Div A";
           return div === assignmentFilterDivision;
@@ -5801,12 +5814,12 @@ const pages = {
                       <td style="font-size:11px;">${formattedSubmitted}</td>
                       <td style="text-align:center;">
                         <div class="pa-toggle-group" style="justify-content:center; gap: 4px;">
-                          <button type="button" class="btn-assign-status btn-pend ${a.status === "Pending" ? "active" : ""} btn-faculty-set-status" data-assign-index="${globalIdx}" data-status="Pending" title="Set Pending">Pending</button>
-                          <button type="button" class="btn-assign-status btn-sub ${a.status === "Submitted" ? "active" : ""} btn-faculty-set-status" data-assign-index="${globalIdx}" data-status="Submitted" title="Set Submitted">Submitted</button>
+                          <button type="button" class="btn-assign-status btn-pend ${a.status === "Pending" ? "active" : ""} btn-faculty-set-status" data-assign-index="${globalIdx}" data-student="${a.student}" data-title="${encodeURIComponent(a.title || '')}" data-due="${a.due}" data-status="Pending" title="Set Pending">Pending</button>
+                          <button type="button" class="btn-assign-status btn-sub ${a.status === "Submitted" ? "active" : ""} btn-faculty-set-status" data-assign-index="${globalIdx}" data-student="${a.student}" data-title="${encodeURIComponent(a.title || '')}" data-due="${a.due}" data-status="Submitted" title="Set Submitted">Submitted</button>
                         </div>
                       </td>
                       <td style="text-align:center;">
-                        <button type="button" class="btn-assign-status btn-del btn-delete-assignment" data-assign-index="${globalIdx}" title="Delete Record">🗑️ Delete</button>
+                        <button type="button" class="btn-assign-status btn-del btn-delete-assignment" data-assign-index="${globalIdx}" data-student="${a.student}" data-title="${encodeURIComponent(a.title || '')}" data-due="${a.due}" title="Delete Record">🗑️ Delete</button>
                       </td>
                     </tr>
                   `;
@@ -6443,6 +6456,27 @@ function facultyDashboard() {
     </div>
   </section>
 
+  <section class="panel faculty-push-panel" style="margin-top: 18px;">
+    <div class="panel-head">
+      <h3>⏰ 15-Minute Class Warning Push Notifications</h3>
+      <span class="badge">Mobile & Desktop Alert</span>
+    </div>
+    <div style="background: rgba(99, 102, 241, 0.06); padding: 20px; border-radius: 12px; border: 1px solid rgba(99, 102, 241, 0.18); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+      <div style="flex: 1; min-width: 250px;">
+        <b style="font-size: 15px; color: #1e293b; display: block; margin-bottom: 4px;">Automatic Mobile & Browser Warnings</b>
+        <small style="color: #64748b; font-size: 13px; line-height: 1.5; display: block;">Receive push alerts on your mobile phone or browser <b>15 minutes before</b> your scheduled class starts showing semester, division, and subject details.</small>
+      </div>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <button type="button" class="primary-btn" onclick="subscribeFacultyPushNotifications()" style="padding: 10px 18px; font-size: 13px;">
+          <span>🔔 Enable 15-Min Class Warnings</span>
+        </button>
+        <button type="button" class="secondary-btn" onclick="triggerTestPushNotification()" style="padding: 10px 18px; font-size: 13px; background: #e2e8f0; color: #334155; border: 1px solid #cbd5e1;">
+          <span>🧪 Test Notification</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
   <section class="panel faculty-course-panel" style="margin-top: 18px;">
     <div class="panel-head">
       <h3>📚 Course & Division Management</h3>
@@ -6594,3 +6628,308 @@ if (saved) {
     el.style.transform = `translateX(${Math.floor(rand(-6, 6))}px)`;
   });
 })();
+
+// Web Push Notifications & Timetable Sync
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/\-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function subscribeFacultyPushNotifications() {
+  if (!currentUser || currentUser.role !== "faculty") {
+    alert("Please log in as a faculty member to enable class warnings.");
+    return false;
+  }
+
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    alert("Push Notifications are not supported by this browser or connection.");
+    return false;
+  }
+
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      alert("Notification permission was denied. Please allow notifications in site settings.");
+      return false;
+    }
+
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+
+    const resKey = await fetch(apiOrigin + "/api/notifications/vapid-public-key");
+    const keyData = await resKey.json();
+    if (!keyData.success || !keyData.publicKey) {
+      throw new Error("Could not retrieve VAPID key from backend server.");
+    }
+
+    const applicationServerKey = urlBase64ToUint8Array(keyData.publicKey);
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: applicationServerKey
+      });
+    }
+
+    const subRes = await fetch(apiOrigin + "/api/notifications/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: currentUser.username,
+        subscription: sub
+      })
+    });
+
+    const subResult = await subRes.json();
+    if (subResult.success) {
+      alert("✅ 15-Minute Class Warning Push Notifications have been enabled!");
+      if (typeof render === "function") render();
+      return true;
+    } else {
+      alert("Setup error: " + subResult.message);
+      return false;
+    }
+  } catch (err) {
+    console.error("Push subscription error:", err);
+    alert("Push notification setup failed: " + err.message);
+    return false;
+  }
+}
+
+async function triggerTestPushNotification() {
+  if (!currentUser || currentUser.role !== "faculty") return;
+  try {
+    const res = await fetch(apiOrigin + "/api/notifications/test-push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: currentUser.username })
+    });
+    const data = await res.json();
+    alert(data.message);
+  } catch (err) {
+    alert("Test push error: " + err.message);
+  }
+}
+
+function syncTimetableToBackend() {
+  if (Array.isArray(ACADEMIC.timetable)) {
+    fetch(apiOrigin + "/api/timetable/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ timetable: ACADEMIC.timetable })
+    }).catch(e => console.warn("Timetable backend sync warning:", e));
+  }
+}
+
+function syncAcademicDataToBackend() {
+  if (!ACADEMIC) return;
+  fetch(apiOrigin + "/api/academic/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data: ACADEMIC })
+  }).catch(e => console.warn("Academic data backend sync error:", e));
+}
+
+async function hydrateAcademicDataFromServer() {
+  try {
+    const res = await fetch(apiOrigin + "/api/academic/data");
+    const json = await res.json();
+    if (json.success && json.data) {
+      const serverAcademic = normalizeAcademicData(json.data);
+      const hasServerData = Object.keys(serverAcademic.students).length > 0 || serverAcademic.notices.length > 0 || serverAcademic.assignments.length > 0 || serverAcademic.timetable.length > 0;
+      if (hasServerData) {
+        ACADEMIC = serverAcademic;
+        localStorage.setItem("smartPortalAcademic", JSON.stringify(ACADEMIC));
+        window.dispatchEvent(new CustomEvent("academicDataUpdated"));
+        updateNoticeBadges();
+        updateNotesBadges();
+        if (typeof render === "function") render();
+      } else {
+        syncAcademicDataToBackend();
+      }
+    }
+  } catch (e) {
+    console.warn("Could not hydrate academic data from MongoDB backend:", e);
+  }
+}
+
+// Global delegated click handler for Student Assignment Status buttons with instant 0ms UI toggle
+document.addEventListener("click", e => {
+  const statusBtn = e.target.closest(".btn-faculty-set-status");
+  if (statusBtn) {
+    e.preventDefault();
+    const studentUsername = statusBtn.dataset.student;
+    const title = decodeURIComponent(statusBtn.dataset.title || "");
+    const due = statusBtn.dataset.due;
+    const newStatus = statusBtn.dataset.status;
+
+    // 1. INSTANT 0ms UI TOGGLE ON THE BUTTON GROUP
+    const toggleGroup = statusBtn.closest(".pa-toggle-group");
+    if (toggleGroup) {
+      toggleGroup.querySelectorAll(".btn-faculty-set-status").forEach(btn => {
+        if (btn.dataset.status === newStatus) {
+          btn.classList.add("active");
+        } else {
+          btn.classList.remove("active");
+        }
+      });
+    }
+
+    const tr = statusBtn.closest("tr");
+    const todayISO = getTodayISODate();
+
+    // 2. INSTANT 0ms SUBMITTED DATE CELL UPDATE
+    if (tr) {
+      const tds = tr.querySelectorAll("td");
+      if (tds && tds[6]) {
+        tds[6].innerHTML = newStatus === "Submitted"
+          ? formatDateDDOrdinalMonth(todayISO)
+          : `<span style="color:#94a3b8;">Not Submitted</span>`;
+      }
+    }
+
+    // 3. PERSIST STATE IN LOCALSTORAGE & MONGODB ATLAS
+    const normUser = String(studentUsername || "").trim().toLowerCase();
+    const normTitle = String(title || "").trim().toLowerCase();
+
+    let assign = ACADEMIC.assignments.find(a =>
+      String(a.student || "").trim().toLowerCase() === normUser &&
+      String(a.title || "").trim().toLowerCase() === normTitle &&
+      (!due || String(a.due || "").trim() === String(due).trim())
+    );
+
+    if (!assign) {
+      assign = ACADEMIC.assignments.find(a =>
+        String(a.student || "").trim().toLowerCase() === normUser &&
+        String(a.title || "").trim().toLowerCase() === normTitle
+      );
+    }
+
+    if (!assign) {
+      const idx = parseInt(statusBtn.dataset.assignIndex, 10);
+      if (!isNaN(idx)) {
+        const subjectList = getSubjectAssignments(currentUser ? currentUser.subject : "");
+        assign = subjectList[idx];
+      }
+    }
+
+    if (assign) {
+      assign.status = newStatus;
+      assign.submittedDate = newStatus === "Submitted" ? (assign.submittedDate || todayISO) : "";
+      saveAcademicData();
+    }
+    return;
+  }
+
+  const deleteBtn = e.target.closest(".btn-delete-assignment");
+  if (deleteBtn) {
+    e.preventDefault();
+    const studentUsername = deleteBtn.dataset.student;
+    const title = decodeURIComponent(deleteBtn.dataset.title || "");
+    const due = deleteBtn.dataset.due;
+
+    const normUser = String(studentUsername || "").trim().toLowerCase();
+    const normTitle = String(title || "").trim().toLowerCase();
+
+    const st = (USERS.student || []).find(u => String(u.username).toLowerCase() === normUser);
+    const studentName = st ? st.name : studentUsername;
+
+    if (confirm(`Delete assignment "${title}" for ${studentName}?`)) {
+      // INSTANT 0ms ROW REMOVAL
+      const tr = deleteBtn.closest("tr");
+      if (tr) tr.remove();
+
+      if (!Array.isArray(ACADEMIC.deletedAssignments)) ACADEMIC.deletedAssignments = [];
+
+      let assign = ACADEMIC.assignments.find(a =>
+        String(a.student || "").trim().toLowerCase() === normUser &&
+        String(a.title || "").trim().toLowerCase() === normTitle
+      );
+
+      if (assign) {
+        const deleteKey = `${String(assign.student).toLowerCase()}___${assign.subject}___${assign.title}___${assign.due}`;
+        if (!ACADEMIC.deletedAssignments.includes(deleteKey)) {
+          ACADEMIC.deletedAssignments.push(deleteKey);
+        }
+        ACADEMIC.assignments = ACADEMIC.assignments.filter(a => a !== assign);
+      }
+      saveAcademicData();
+    }
+    return;
+  }
+
+  const clearAllBtn = e.target.closest("#btnClearAllAssignments, .btn-clear-all");
+  if (clearAllBtn) {
+    e.preventDefault();
+    if (!currentUser || currentUser.role !== "faculty") return;
+    const subjectObj = subjectById(currentUser ? currentUser.subject : "") || { name: (currentUser ? currentUser.subject : "") || "Subject" };
+    const facSub = currentUser ? String(currentUser.subject || "").trim().toLowerCase() : "";
+
+    let scopeText = `ALL assignment status records for ${subjectObj.name}`;
+    if (assignmentFilterDivision && assignmentFilterDivision !== "All Divisions") {
+      scopeText = `all assignment status records for ${assignmentFilterDivision} in ${subjectObj.name}`;
+    }
+
+    if (confirm(`Are you sure you want to clear ${scopeText}? This action cannot be undone.`)) {
+      // 1. INSTANT 0ms UI CLEAR
+      const tbody = document.querySelector(".compact-status-sheet table tbody");
+      if (tbody) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="9" style="text-align:center; padding: 24px; color: #64748b; font-weight: 600;">
+              🗑️ All assignment status records cleared.
+            </td>
+          </tr>`;
+      }
+      const countBadge = document.getElementById("assignmentRecordCount");
+      if (countBadge) countBadge.textContent = "0 Records";
+
+      // 2. PERSIST DELETION IN LOCALSTORAGE & MONGODB ATLAS
+      if (!Array.isArray(ACADEMIC.deletedAssignments)) ACADEMIC.deletedAssignments = [];
+
+      ACADEMIC.assignments.forEach(a => {
+        const matchSub = !facSub || String(a.subject || "").trim().toLowerCase() === facSub;
+        if (matchSub) {
+          const deleteKey = `${String(a.student).toLowerCase()}___${a.subject}___${a.title}___${a.due}`;
+          if (!ACADEMIC.deletedAssignments.includes(deleteKey)) {
+            ACADEMIC.deletedAssignments.push(deleteKey);
+          }
+        }
+      });
+
+      if (assignmentFilterDivision && assignmentFilterDivision !== "All Divisions") {
+        ACADEMIC.assignments = ACADEMIC.assignments.filter(a => {
+          const matchSub = !facSub || String(a.subject || "").trim().toLowerCase() === facSub;
+          if (matchSub) {
+            const st = (USERS.student || []).find(u => u.username === a.student);
+            const div = st ? (st.division || "Div A") : "Div A";
+            return div !== assignmentFilterDivision;
+          }
+          return true;
+        });
+      } else {
+        ACADEMIC.assignments = ACADEMIC.assignments.filter(a => {
+          const matchSub = facSub && String(a.subject || "").trim().toLowerCase() === facSub;
+          return !matchSub;
+        });
+      }
+
+      saveAcademicData();
+    }
+    return;
+  }
+});
+
+hydrateAcademicDataFromServer();
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => { });
+  });
+}

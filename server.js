@@ -8,26 +8,64 @@ const path = require("path");
 const { promisify } = require("util");
 const mongoose = require("mongoose");
 
+const webpush = require("web-push");
+const cron = require("node-cron");
+
 // Mongoose Models
 const User = require("./models/User");
 const Notice = require("./models/Notice");
 const Attendance = require("./models/Attendance");
 const Mark = require("./models/Mark");
 const Assignment = require("./models/Assignment");
+const Timetable = require("./models/Timetable");
+const AcademicStore = require("./models/AcademicStore");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/smart_student_portal";
 const DB_FILE = path.join(__dirname, "data", "database.json");
 
+// VAPID Keys Setup for Web Push Notifications
+let vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
+let vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+
+if (!vapidPublicKey || !vapidPrivateKey) {
+  const vapidKeys = webpush.generateVAPIDKeys();
+  vapidPublicKey = vapidKeys.publicKey;
+  vapidPrivateKey = vapidKeys.privateKey;
+  process.env.VAPID_PUBLIC_KEY = vapidPublicKey;
+  process.env.VAPID_PRIVATE_KEY = vapidPrivateKey;
+
+  try {
+    const envPath = path.join(__dirname, ".env");
+    let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+    if (!envContent.includes("VAPID_PUBLIC_KEY")) {
+      envContent += `\nVAPID_PUBLIC_KEY=${vapidPublicKey}\nVAPID_PRIVATE_KEY=${vapidPrivateKey}\n`;
+      fs.writeFileSync(envPath, envContent, "utf8");
+    }
+  } catch (e) {
+    console.error("Could not save VAPID keys to .env:", e.message);
+  }
+}
+
+webpush.setVapidDetails(
+  "mailto:admin@smartportal.edu",
+  vapidPublicKey,
+  vapidPrivateKey
+);
+
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
-// Serve the portal from the same Node.js server so Live Server is not required.
+// Serve static portal assets and service worker
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/index.html", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/style.css", (req, res) => res.sendFile(path.join(__dirname, "style.css")));
 app.get("/script.js", (req, res) => res.sendFile(path.join(__dirname, "script.js")));
+app.get("/sw.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript");
+  res.sendFile(path.join(__dirname, "sw.js"));
+});
 
 const scryptAsync = promisify(crypto.scrypt);
 
@@ -404,6 +442,246 @@ app.post("/api/auth/login", async (req, res) => {
   } catch (error) {
     console.error("Login error:", error);
     res.status(500).json({ success: false, message: "Unable to sign in right now." });
+  }
+});
+
+// --- Push Notification & Timetable Endpoints ---
+
+app.get("/api/notifications/vapid-public-key", (req, res) => {
+  res.json({ success: true, publicKey: vapidPublicKey });
+});
+
+app.post("/api/notifications/subscribe", async (req, res) => {
+  try {
+    const { username, subscription } = req.body || {};
+    if (!username || !subscription) {
+      return res.status(400).json({ success: false, message: "Username and subscription required." });
+    }
+
+    const user = await User.findOne({ username: new RegExp(`^${normalizeUsername(username)}$`, "i") });
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Faculty account not found." });
+    }
+
+    user.pushSubscription = subscription;
+    await user.save();
+
+    res.json({ success: true, message: "15-minute class warning push notifications enabled!" });
+  } catch (error) {
+    console.error("Subscribe push error:", error);
+    res.status(500).json({ success: false, message: "Failed to save push subscription." });
+  }
+});
+
+app.post("/api/notifications/test-push", async (req, res) => {
+  try {
+    const { username } = req.body || {};
+    const user = await User.findOne({ username: new RegExp(`^${normalizeUsername(username)}$`, "i") });
+    if (!user || !user.pushSubscription) {
+      return res.status(400).json({ success: false, message: "No active push subscription found for this account." });
+    }
+
+    const payload = JSON.stringify({
+      title: "🧪 Test Class Warning Alert",
+      body: "Notifications are working! You will receive alerts 15 minutes before your scheduled classes.",
+      icon: "/favicon.ico",
+      url: "/index.html#timetable"
+    });
+
+    await webpush.sendNotification(user.pushSubscription, payload);
+    res.json({ success: true, message: "Test notification sent to your device!" });
+  } catch (error) {
+    console.error("Test push error:", error);
+    res.status(500).json({ success: false, message: "Failed to send test push notification: " + error.message });
+  }
+});
+
+app.get("/api/timetable", async (req, res) => {
+  try {
+    const entries = await Timetable.find({});
+    res.json({ success: true, timetable: entries });
+  } catch (error) {
+    console.error("Fetch timetable error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch timetable." });
+  }
+});
+
+app.post("/api/timetable/sync", async (req, res) => {
+  try {
+    const { timetable } = req.body || {};
+    if (Array.isArray(timetable)) {
+      await Timetable.deleteMany({});
+      if (timetable.length > 0) {
+        const docs = timetable.map(item => ({
+          division: item.division || "Div A",
+          semester: item.semester || "",
+          day: item.day,
+          time: item.time,
+          subject: item.subject || "",
+          subjectText: item.subjectText || item.subject || "Class",
+          faculty: item.faculty || ""
+        }));
+        await Timetable.insertMany(docs);
+      }
+    }
+    res.json({ success: true, message: "Timetable synchronized." });
+  } catch (error) {
+    console.error("Sync timetable error:", error);
+    res.status(500).json({ success: false, message: "Failed to sync timetable." });
+  }
+});
+
+// --- 15-Minute Class Warning Cron Scheduler ---
+
+function parseStartMinutes(timeStr) {
+  if (!timeStr) return null;
+  const startPart = String(timeStr).split("-")[0].trim();
+  const match = startPart.match(/^(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);
+  if (!match) return null;
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const ampm = match[3] ? match[3].toUpperCase() : null;
+
+  if (ampm === "PM" && hours < 12) hours += 12;
+  if (ampm === "AM" && hours === 12) hours = 0;
+
+  return hours * 60 + minutes;
+}
+
+const notifiedClasses = new Set();
+
+async function check15MinClassWarnings() {
+  try {
+    if (mongoose.connection.readyState !== 1) return;
+
+    const now = new Date();
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const currentDay = days[now.getDay()];
+    if (currentDay === "Sunday") return;
+
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const entries = await Timetable.find({ day: currentDay });
+    if (!entries.length) return;
+
+    for (const entry of entries) {
+      const classStart = parseStartMinutes(entry.time);
+      if (classStart === null) continue;
+
+      const diff = classStart - currentMinutes;
+      // Triggers if class starts in 14 to 16 minutes from now
+      if (diff >= 14 && diff <= 16) {
+        const notifKey = `${now.toISOString().slice(0, 10)}_${entry._id}`;
+        if (notifiedClasses.has(notifKey)) continue;
+
+        let facultyQuery = { role: "faculty", pushSubscription: { $ne: null } };
+        if (entry.faculty) {
+          facultyQuery.username = new RegExp(`^${entry.faculty}$`, "i");
+        }
+        let faculties = await User.find(facultyQuery);
+
+        if (!faculties.length && entry.subject) {
+          faculties = await User.find({
+            role: "faculty",
+            subject: new RegExp(`^${entry.subject}$`, "i"),
+            pushSubscription: { $ne: null }
+          });
+        }
+
+        const payload = JSON.stringify({
+          title: "⏰ 15-Minute Class Warning!",
+          body: `Your next class (${entry.subjectText || entry.subject}) for ${entry.semester || "Semester"} (${entry.division}) starts in 15 minutes at ${entry.time}!`,
+          icon: "/favicon.ico",
+          url: "/index.html#timetable"
+        });
+
+        for (const faculty of faculties) {
+          if (!faculty.pushSubscription) continue;
+          try {
+            await webpush.sendNotification(faculty.pushSubscription, payload);
+            console.log(`[WebPush] Alert sent to faculty ${faculty.username} for class at ${entry.time}`);
+            notifiedClasses.add(notifKey);
+          } catch (err) {
+            console.error(`[WebPush Error] ${faculty.username}:`, err.message);
+            if (err.statusCode === 410 || err.statusCode === 404) {
+              faculty.pushSubscription = null;
+              await faculty.save();
+            }
+          }
+        }
+      }
+    }
+
+    if (now.getHours() === 0 && now.getMinutes() === 0) {
+      notifiedClasses.clear();
+    }
+  } catch (err) {
+    console.error("[Cron Job Error]", err.message);
+  }
+}
+
+cron.schedule("* * * * *", () => {
+  check15MinClassWarnings();
+});
+
+// --- Academic Data MongoDB Persistence Endpoints ---
+
+app.get("/api/academic/data", async (req, res) => {
+  try {
+    let store = await AcademicStore.findOne({ storeKey: "default_academic_store" });
+    if (!store) {
+      store = await AcademicStore.create({ storeKey: "default_academic_store" });
+    }
+    res.json({
+      success: true,
+      data: {
+        students: store.students || {},
+        notices: store.notices || [],
+        timetable: store.timetable || [],
+        timetableHeader: store.timetableHeader || {},
+        customBreakRows: store.customBreakRows || {},
+        assignments: store.assignments || [],
+        notes: store.notes || [],
+        deletedAssignments: store.deletedAssignments || [],
+        dailyAttendance: store.dailyAttendance || [],
+        subjectMarksConfig: store.subjectMarksConfig || {}
+      }
+    });
+  } catch (error) {
+    console.error("Fetch academic data error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch academic data." });
+  }
+});
+
+app.post("/api/academic/sync", async (req, res) => {
+  try {
+    const payload = req.body?.data || req.body || {};
+    let store = await AcademicStore.findOne({ storeKey: "default_academic_store" });
+    if (!store) {
+      store = new AcademicStore({ storeKey: "default_academic_store" });
+    }
+
+    if (payload.students && typeof payload.students === "object") store.students = payload.students;
+    if (Array.isArray(payload.notices)) store.notices = payload.notices;
+    if (Array.isArray(payload.timetable)) store.timetable = payload.timetable;
+    if (payload.timetableHeader && typeof payload.timetableHeader === "object") store.timetableHeader = payload.timetableHeader;
+    if (payload.customBreakRows && typeof payload.customBreakRows === "object") store.customBreakRows = payload.customBreakRows;
+    if (Array.isArray(payload.assignments)) store.assignments = payload.assignments;
+    if (Array.isArray(payload.notes)) store.notes = payload.notes;
+    if (Array.isArray(payload.deletedAssignments)) store.deletedAssignments = payload.deletedAssignments;
+    if (Array.isArray(payload.dailyAttendance)) store.dailyAttendance = payload.dailyAttendance;
+    if (payload.subjectMarksConfig && typeof payload.subjectMarksConfig === "object") store.subjectMarksConfig = payload.subjectMarksConfig;
+
+    store.markModified("students");
+    store.markModified("timetableHeader");
+    store.markModified("customBreakRows");
+    store.markModified("subjectMarksConfig");
+
+    await store.save();
+    res.json({ success: true, message: "Academic data permanently saved to MongoDB!" });
+  } catch (error) {
+    console.error("Sync academic data error:", error);
+    res.status(500).json({ success: false, message: "Failed to sync academic data." });
   }
 });
 
